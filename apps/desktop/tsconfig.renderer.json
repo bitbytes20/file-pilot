@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "rootDir": "src/renderer",
+    "outDir": "dist/renderer",
+    "declaration": true,
+    "declarationMap": true,
+    "tsBuildInfoFile": "dist/renderer.tsbuildinfo"
+  },
+  "include": ["src/renderer"],
+  "references": [
+    { "path": "../../packages/ui" },
+    { "path": "../../packages/shared-contracts" }
+  ]
+}

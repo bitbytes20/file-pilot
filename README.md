@@ -40,13 +40,30 @@ packages/
   config/               # Shared ESLint, TS, Vitest, Playwright configs
 ```
 
-## Getting Started (Scaffold Stage)
+## Getting Started
 
 ```bash
 pnpm install
 pnpm run lint
 pnpm run typecheck
 pnpm run test
+
+# Start the desktop shell (builds TypeScript and launches Electron)
+pnpm run dev --filter @filepilot/desktop
 ```
 
-> This repository currently contains the foundation architecture, planning, and workflow artifacts. Feature implementation proceeds ticket-by-ticket.
+### Workspace Layout
+
+```text
+apps/
+  desktop/              # Electron main/preload/renderer workspace
+packages/
+  domain/               # Domain models and invariants
+  application/          # Use cases and orchestration policies
+  infrastructure/       # Platform adapters (fs, db, hashing)
+  ui/                   # Shared UI primitives/tokens
+  shared-contracts/     # IPC contracts shared across layers
+  config/               # ESLint/Prettier/Vitest/Playwright configs
+```
+
+Each package is a TypeScript project reference so `tsc -b` builds the graph in dependency order. Use `pnpm --filter <package> <script>` to target a specific workspace (e.g., `pnpm --filter @filepilot/domain test`).

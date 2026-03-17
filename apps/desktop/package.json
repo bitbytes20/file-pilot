@@ -1,0 +1,25 @@
+{
+  "name": "@filepilot/desktop",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/main/main.js",
+  "scripts": {
+    "build": "tsc -b",
+    "dev": "pnpm run build && cross-env NODE_ENV=development electron .",
+    "lint": "eslint --max-warnings=0 \"src/**/*.{ts,tsx}\"",
+    "typecheck": "tsc -b",
+    "test": "vitest --run"
+  },
+  "dependencies": {
+    "@filepilot/application": "workspace:*",
+    "@filepilot/domain": "workspace:*",
+    "@filepilot/infrastructure": "workspace:*",
+    "@filepilot/shared-contracts": "workspace:*",
+    "electron": "^28.3.3"
+  },
+  "devDependencies": {
+    "@filepilot/config": "workspace:*",
+    "vitest": "^1.2.0"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "rootDir": "src/preload",
+    "outDir": "dist/preload",
+    "declaration": true,
+    "declarationMap": true,
+    "tsBuildInfoFile": "dist/preload.tsbuildinfo",
+    "types": ["node", "electron"]
+  },
+  "include": ["src/preload"],
+  "references": [
+    { "path": "../../packages/shared-contracts" }
+  ]
+}
