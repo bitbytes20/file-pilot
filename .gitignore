@@ -1,0 +1,10 @@
+node_modules
+.pnpm-store
+.turbo
+dist
+build
+coverage
+playwright-report
+.vscode
+.DS_Store
+*.log

@@ -1,0 +1,20 @@
+name: Task
+description: Internal implementation task
+labels: [task]
+body:
+  - type: input
+    id: parent
+    attributes:
+      label: Parent Story / Epic
+  - type: textarea
+    id: deliverable
+    attributes:
+      label: Deliverable
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance Criteria
+    validations:
+      required: true
