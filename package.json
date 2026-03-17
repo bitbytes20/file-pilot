@@ -1,0 +1,17 @@
+{
+  "name": "file-pilot",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Windows-first local-first desktop utility for safe file management.",
+  "packageManager": "pnpm@9.0.0",
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev --parallel",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test"
+  },
+  "devDependencies": {
+    "turbo": "^2.0.0"
+  }
+}
