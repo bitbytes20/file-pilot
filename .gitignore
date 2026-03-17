@@ -1,10 +1,22 @@
-node_modules
-.pnpm-store
-.turbo
-dist
-build
-coverage
-playwright-report
-.vscode
+# node / pnpm
+node_modules/
+
+# build artifacts
+dist/
+build/
+coverage/
+turbo/
+.turbo/
+
+# editor/OS
 .DS_Store
 *.log
+*.tmp
+.vscode/
+.idea/
+
+# env
+.env*
+
+# test snapshots
+*.tsbuildinfo

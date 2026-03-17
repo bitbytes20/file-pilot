@@ -1,0 +1,18 @@
+{
+  "name": "@filepilot/config",
+  "private": true,
+  "version": "0.0.0",
+  "type": "commonjs",
+  "exports": {
+    "./eslint": {
+      "require": "./src/eslint.cjs",
+      "default": "./src/eslint.cjs"
+    },
+    "./prettier": {
+      "require": "./src/prettier.cjs",
+      "default": "./src/prettier.cjs"
+    },
+    "./vitest": "./src/vitest.config.js",
+    "./playwright": "./src/playwright.config.ts"
+  }
+}
