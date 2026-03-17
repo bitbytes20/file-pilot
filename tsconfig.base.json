@@ -10,6 +10,15 @@
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "esModuleInterop": true
+    "esModuleInterop": true,
+    "baseUrl": ".",
+    "paths": {
+      "@filepilot/domain": ["packages/domain/src"],
+      "@filepilot/application": ["packages/application/src"],
+      "@filepilot/infrastructure": ["packages/infrastructure/src"],
+      "@filepilot/ui": ["packages/ui/src"],
+      "@filepilot/shared-contracts": ["packages/shared-contracts/src"],
+      "@filepilot/config/*": ["packages/config/src/*"]
+    }
   }
 }
