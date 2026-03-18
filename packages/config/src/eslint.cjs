@@ -1,3 +1,7 @@
+const path = require('node:path');
+
+const repoRoot = path.resolve(__dirname, '../../..');
+
 module.exports = {
   env: {
     browser: true,
@@ -28,7 +32,12 @@ module.exports = {
     'import/resolver': {
       typescript: {
         alwaysTryTypes: true,
-        project: ['./tsconfig.json', './packages/*/tsconfig.json', './apps/*/tsconfig.json'],
+        project: [
+          path.join(repoRoot, 'tsconfig.json'),
+          path.join(repoRoot, 'packages/*/tsconfig.json'),
+          path.join(repoRoot, 'apps/*/tsconfig.json'),
+          path.join(repoRoot, 'apps/*/tsconfig.*.json'),
+        ],
       },
     },
   },

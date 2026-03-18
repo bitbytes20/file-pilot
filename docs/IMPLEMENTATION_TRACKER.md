@@ -38,6 +38,17 @@ Optional flags:
 
 ## Commit Entries
 
+### [2026-03-18] pending fix: align eslint workspace import resolution
+
+- Implemented:
+  - Updated the shared ESLint config to resolve TypeScript projects from the repository root so workspace package imports lint correctly regardless of the current package working directory.
+  - Added app subproject tsconfig glob support so Electron main, preload, and renderer package references resolve during per-package lint runs in CI.
+- Affected areas:
+  - `packages/config/src/eslint.cjs`
+  - `docs/IMPLEMENTATION_TRACKER.md`
+- Notes:
+  - This fixes CI lint failures for `@filepilot/shared-contracts` imports in the desktop workspace.
+
 ### [2026-03-18] pending fix: resolve pnpm ci version conflict
 
 - Implemented:
