@@ -38,6 +38,18 @@ Optional flags:
 
 ## Commit Entries
 
+### [2026-03-18] pending chore: make husky pre-commit hook v10 compatible
+
+- Implemented:
+  - Updated the Husky pre-commit hook to remove deprecated bootstrap sourcing lines that will fail in Husky v10.
+  - Preserved existing commit enforcement behavior requiring `docs/IMPLEMENTATION_TRACKER.md` to be staged.
+  - Kept lint-staged execution through `corepack pnpm exec lint-staged` unchanged.
+- Affected areas:
+  - `.husky/pre-commit`
+  - `docs/IMPLEMENTATION_TRACKER.md`
+- Notes:
+  - Replace `pending` with the actual short hash after commit creation.
+
 ### [2026-03-18] 53d797a chore: enforce implementation tracking automation
 
 - Implemented:
