@@ -38,6 +38,22 @@ Optional flags:
 
 ## Commit Entries
 
+### [2026-03-18] pending feat: implement tranche b typed ipc shell
+
+- Implemented:
+  - Added shared IPC contracts, request/event payload types, and boundary parsers for the Electron app bridge.
+  - Registered secure main-process IPC handlers for app version lookup, folder selection, and a mock scan workflow that streams progress/completion events.
+  - Replaced the preload placeholder with a narrow `window.filePilot` API and built a renderer shell that can choose a folder and run a mock scan end-to-end.
+  - Swapped the temporary placeholder UI loading path for a CSP-hardened renderer HTML bootstrap that inlines the compiled renderer bundle.
+- Affected areas:
+  - `packages/shared-contracts/src/index.ts`
+  - `apps/desktop/src/main`
+  - `apps/desktop/src/preload/index.ts`
+  - `apps/desktop/src/renderer`
+  - `docs/IMPLEMENTATION_TRACKER.md`
+- Notes:
+  - The scan flow is intentionally mocked for Tranche B so the typed IPC surface can be validated before real traversal services land.
+
 ### [2026-03-18] pending chore: make husky pre-commit hook v10 compatible
 
 - Implemented:

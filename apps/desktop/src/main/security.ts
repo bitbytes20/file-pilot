@@ -1,6 +1,6 @@
 import { app, shell, session, type WebContents } from 'electron';
 
-const trustedOrigins = new Set(['file://']);
+const trustedOrigins = new Set(['file://', 'data:']);
 
 const enforceNavigationGuards = (contents: WebContents) => {
   contents.on('will-navigate', (event, url) => {
