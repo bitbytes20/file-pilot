@@ -38,6 +38,17 @@ Optional flags:
 
 ## Commit Entries
 
+### [2026-03-18] pending fix: resolve pnpm ci version conflict
+
+- Implemented:
+  - Updated the GitHub Actions CI workflow to rely on the repository `packageManager` declaration instead of redundantly pinning pnpm in `pnpm/action-setup`.
+  - Removed the duplicate pnpm version source that caused `pnpm/action-setup@v4` to fail before install steps started.
+- Affected areas:
+  - `.github/workflows/ci.yml`
+  - `docs/IMPLEMENTATION_TRACKER.md`
+- Notes:
+  - This is a CI-only fix; application behavior is unchanged.
+
 ### [2026-03-18] pending feat: implement tranche b typed ipc shell
 
 - Implemented:
