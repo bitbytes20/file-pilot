@@ -38,7 +38,7 @@ Optional flags:
 
 ## Commit Entries
 
-### [2026-03-18] pending chore: enforce implementation tracking automation
+### [2026-03-18] 53d797a chore: enforce implementation tracking automation
 
 - Implemented:
   - Added a repository implementation tracker with update rules, helper command guidance, template, and seeded baseline commit entries.
@@ -55,7 +55,7 @@ Optional flags:
   - `package.json`
   - `scripts/generate-tracker-entry.mjs`
 - Notes:
-  - Replace `pending` with the actual short hash after the commit is created.
+  - Hash filled after commit creation.
 
 ### [2026-03-17] 7d071da feat: add secure Electron desktop shell
 
