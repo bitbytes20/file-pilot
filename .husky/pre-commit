@@ -1,4 +1,11 @@
 #!/bin/sh
 . "$(dirname "$0")/_/husky.sh"
 
-pnpm exec lint-staged
+tracker_file="docs/IMPLEMENTATION_TRACKER.md"
+
+if ! git diff --cached --name-only --diff-filter=ACMRT | grep -Fxq "$tracker_file"; then
+	echo "Commit blocked: update $tracker_file with this commit's implementation summary."
+	exit 1
+fi
+
+corepack pnpm exec lint-staged

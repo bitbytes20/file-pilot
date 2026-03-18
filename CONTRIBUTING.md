@@ -26,6 +26,7 @@ Thanks for contributing.
 ## Commit Style
 
 Use conventional commits where possible:
+
 - `feat:`
 - `fix:`
 - `docs:`
@@ -33,9 +34,17 @@ Use conventional commits where possible:
 - `test:`
 - `chore:`
 
+## Implementation Tracker (Required)
+
+- Every commit must include an update to `docs/IMPLEMENTATION_TRACKER.md`.
+- Add one new entry per commit at the top of `## Commit Entries`.
+- Include date, short hash (or `pending` before commit), commit subject, implemented scope, and affected areas.
+- If `pending` is used, replace it with the actual short hash before finishing the work.
+
 ## Safety Expectations
 
 Changes affecting delete/move logic must include:
+
 - dry-run behavior coverage
 - failure mode assertions
 - audit event assertions

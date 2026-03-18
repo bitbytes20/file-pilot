@@ -24,6 +24,7 @@ FilePilot is a **Windows-first, local-first desktop utility** for safe and intel
 - Architecture blueprint: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 - Roadmap (epics/stories/tasks): [`docs/ROADMAP.md`](docs/ROADMAP.md)
 - Testing strategy: [`docs/TESTING_STRATEGY.md`](docs/TESTING_STRATEGY.md)
+- Implementation tracker: [`docs/IMPLEMENTATION_TRACKER.md`](docs/IMPLEMENTATION_TRACKER.md)
 - Contributing guide: [`CONTRIBUTING.md`](CONTRIBUTING.md)
 - Security policy: [`SECURITY.md`](SECURITY.md)
 
