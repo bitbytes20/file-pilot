@@ -14,5 +14,9 @@
   },
   "devDependencies": {
     "@filepilot/config": "workspace:*"
+  },
+  "dependencies": {
+    "@filepilot/domain": "workspace:*",
+    "@filepilot/infrastructure": "workspace:*"
   }
 }

@@ -1,7 +1,13 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import {
   ipcChannels,
+  parseScanCancelRequest,
   parseScanCompleteEvent,
+  parseScanFileListResponse,
+  parseScanGetJobRequest,
+  parseScanJobListResponse,
+  parseScanJobResponse,
+  parseScanListFilesRequest,
   parseScanProgressEvent,
   parseScanStartRequest,
   type FilePilotApi,
@@ -33,8 +39,16 @@ const registerEvent = <T>(
 const api: FilePilotApi = {
   getVersion: async () => ipcRenderer.invoke(ipcChannels.appGetVersion),
   selectFolder: async () => ipcRenderer.invoke(ipcChannels.dialogSelectFolder),
-  startMockScan: async (request) =>
-    ipcRenderer.invoke(ipcChannels.scanStartMock, parseScanStartRequest(request)),
+  startScan: async (request) =>
+    parseScanJobResponse(await ipcRenderer.invoke(ipcChannels.scanStart, parseScanStartRequest(request)))!,
+  getScanJob: async (request) =>
+    parseScanJobResponse(await ipcRenderer.invoke(ipcChannels.scanGetJob, parseScanGetJobRequest(request))),
+  listRecentScanJobs: async () =>
+    parseScanJobListResponse(await ipcRenderer.invoke(ipcChannels.scanListRecentJobs)),
+  listFilesForJob: async (request) =>
+    parseScanFileListResponse(await ipcRenderer.invoke(ipcChannels.scanListFiles, parseScanListFilesRequest(request))),
+  cancelScan: async (request) =>
+    parseScanJobResponse(await ipcRenderer.invoke(ipcChannels.scanCancel, parseScanCancelRequest(request))),
   onScanProgress: (listener: (event: ScanProgressEvent) => void) =>
     registerEvent(ipcChannels.scanProgress, parseScanProgressEvent, listener),
   onScanComplete: (listener: (event: ScanCompleteEvent) => void) =>
