@@ -1,40 +1,39 @@
 import { app, BrowserWindow } from 'electron';
-import { buildPlaceholderHtml } from './ui/placeholderHtml.js';
 import { logger } from './logger.js';
+import { rendererBundlePath, preloadBundlePath } from './paths.js';
 import { enforceSecurityDefaults } from './security.js';
-import { preloadBundlePath } from './paths.js';
+import { registerIpcHandlers } from './ipc/registerHandlers.js';
+import { buildRendererHtml } from './ui/rendererHtml.js';
 import { createMainWindow } from './windows/mainWindow.js';
 
 const isMac = process.platform === 'darwin';
 const isDev = process.env.NODE_ENV === 'development';
 
-const getPlaceholderUrl = () => {
-  // Keep renderer responsibilities isolated; temporary HTML is loaded via data URL until the
-  // dedicated renderer workspace is implemented in Tranche B.
-  const html = buildPlaceholderHtml(app.getVersion());
+const getRendererUrl = async () => {
+  const html = await buildRendererHtml(rendererBundlePath);
   const encoded = encodeURIComponent(html);
   return `data:text/html;charset=utf-8,${encoded}`;
 };
 
-const bootstrap = async () => {
-  await app.whenReady();
-  await enforceSecurityDefaults();
-
+const loadMainWindow = async (): Promise<void> => {
   const window = createMainWindow({
     preloadPath: preloadBundlePath,
     devTools: isDev,
   });
 
-  await window.loadURL(getPlaceholderUrl());
+  await window.loadURL(await getRendererUrl());
+};
+
+const bootstrap = async () => {
+  await app.whenReady();
+  await enforceSecurityDefaults();
+  registerIpcHandlers();
+  await loadMainWindow();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      const newWindow = createMainWindow({
-        preloadPath: preloadBundlePath,
-        devTools: isDev,
-      });
-      newWindow.loadURL(getPlaceholderUrl()).catch((error) => {
-        logger.error('Failed to load placeholder UI', error);
+      loadMainWindow().catch((error) => {
+        logger.error('Failed to load renderer UI', error);
       });
     }
   });
