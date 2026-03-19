@@ -11,9 +11,18 @@
   },
   "include": ["src/main"],
   "references": [
-    { "path": "../../packages/domain" },
-    { "path": "../../packages/application" },
-    { "path": "../../packages/infrastructure" },
-    { "path": "../../packages/shared-contracts" }
-  ]
+    {
+      "path": "../../packages/domain"
+    },
+    {
+      "path": "../../packages/application"
+    },
+    {
+      "path": "../../packages/infrastructure"
+    },
+    {
+      "path": "../../packages/shared-contracts"
+    }
+  ],
+  "exclude": ["src/**/*.test.ts"]
 }

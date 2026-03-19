@@ -17,6 +17,14 @@
     },
     "test": {
       "dependsOn": ["^test"]
+    },
+    "test:e2e": {
+      "cache": false,
+      "dependsOn": ["build"]
+    },
+    "smoke:built": {
+      "cache": false,
+      "dependsOn": ["build"]
     }
   }
 }

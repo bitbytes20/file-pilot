@@ -1,8 +1,34 @@
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
-import { guessFileCategory, type FileRecord, type ScanEventRecord, type ScanJob } from '@filepilot/domain';
+import type { DatabaseSync } from 'node:sqlite';
+import {
+  guessFileCategory,
+  type FileRecord,
+  type ScanEventRecord,
+  type ScanJob,
+} from '@filepilot/domain';
+
+export interface StructuredLogEntry {
+  readonly level: 'debug' | 'info' | 'warning' | 'error';
+  readonly domain: string;
+  readonly message: string;
+  readonly context?: Record<string, unknown>;
+}
+
+export interface Logger {
+  debug(entry: Omit<StructuredLogEntry, 'level'>): void;
+  info(entry: Omit<StructuredLogEntry, 'level'>): void;
+  warn(entry: Omit<StructuredLogEntry, 'level'>): void;
+  error(entry: Omit<StructuredLogEntry, 'level'>): void;
+}
+
+const noopLogger: Logger = {
+  debug: () => undefined,
+  info: () => undefined,
+  warn: () => undefined,
+  error: () => undefined,
+};
 
 export interface DatabaseContext {
   readonly database: DatabaseSync;
@@ -11,6 +37,8 @@ export interface DatabaseContext {
 
 type ScanJobRow = Omit<ScanJob, never>;
 type FileRow = Omit<FileRecord, never>;
+type ScanEventRow = Omit<ScanEventRecord, never>;
+
 const toIsoString = (value: Date | number | null | undefined): string | null => {
   if (value === null || value === undefined) {
     return null;
@@ -21,12 +49,24 @@ const toIsoString = (value: Date | number | null | undefined): string | null => 
 
 const toScanJob = (row: ScanJobRow): ScanJob => row;
 const toFileRecord = (row: FileRow): FileRecord => row;
+const toScanEventRecord = (row: ScanEventRow): ScanEventRecord => row;
 
-export const bootstrapDatabase = async (databaseFilePath: string): Promise<DatabaseContext> => {
-  await fs.mkdir(path.dirname(databaseFilePath), { recursive: true });
-  const database = new DatabaseSync(databaseFilePath);
+const loadDatabaseSync = async (): Promise<typeof import('node:sqlite').DatabaseSync> => {
+  try {
+    const sqlite = await import('node:sqlite');
+    return sqlite.DatabaseSync;
+  } catch (error) {
+    throw new Error(
+      'SQLite runtime is unavailable in this build. FilePilot currently requires node:sqlite support in the host runtime.',
+      { cause: error instanceof Error ? error : undefined }
+    );
+  }
+};
+
+const runMigrations = (database: DatabaseSync, logger: Logger): void => {
+  logger.info({ domain: 'database', message: 'Applying SQLite migrations.' });
+  database.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
   database.exec(`
-    PRAGMA journal_mode = WAL;
     CREATE TABLE IF NOT EXISTS scan_jobs (
       id TEXT PRIMARY KEY,
       root_path TEXT NOT NULL,
@@ -69,6 +109,21 @@ export const bootstrapDatabase = async (databaseFilePath: string): Promise<Datab
     );
     CREATE INDEX IF NOT EXISTS idx_scan_events_job_id ON scan_events(job_id);
   `);
+};
+
+export const bootstrapDatabase = async (
+  databaseFilePath: string,
+  logger: Logger = noopLogger
+): Promise<DatabaseContext> => {
+  await fs.mkdir(path.dirname(databaseFilePath), { recursive: true });
+  logger.info({
+    domain: 'database',
+    message: 'Opening SQLite database.',
+    context: { databaseFilePath },
+  });
+  const DatabaseSync = await loadDatabaseSync();
+  const database = new DatabaseSync(databaseFilePath);
+  runMigrations(database, logger);
 
   return {
     database,
@@ -103,10 +158,12 @@ export class ScanJobRepository {
     };
 
     this.database
-      .prepare(`INSERT INTO scan_jobs (
+      .prepare(
+        `INSERT INTO scan_jobs (
         id, root_path, status, processed_paths, discovered_files, scanned_bytes, percent_complete,
         current_path, error_message, started_at, completed_at, cancelled_at, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
       .run(
         job.id,
         job.rootPath,
@@ -127,7 +184,10 @@ export class ScanJobRepository {
     return job;
   }
 
-  public update(jobId: string, patch: Partial<Omit<ScanJob, 'id' | 'rootPath' | 'startedAt' | 'createdAt'>>): ScanJob {
+  public update(
+    jobId: string,
+    patch: Partial<Omit<ScanJob, 'id' | 'rootPath' | 'startedAt' | 'createdAt'>>
+  ): ScanJob {
     const current = this.getById(jobId);
     if (!current) {
       throw new Error(`Scan job ${jobId} was not found.`);
@@ -140,10 +200,12 @@ export class ScanJobRepository {
     };
 
     this.database
-      .prepare(`UPDATE scan_jobs SET
+      .prepare(
+        `UPDATE scan_jobs SET
         status = ?, processed_paths = ?, discovered_files = ?, scanned_bytes = ?, percent_complete = ?,
         current_path = ?, error_message = ?, completed_at = ?, cancelled_at = ?, updated_at = ?
-        WHERE id = ?`)
+        WHERE id = ?`
+      )
       .run(
         next.status,
         next.processedPaths,
@@ -161,9 +223,22 @@ export class ScanJobRepository {
     return next;
   }
 
+  public failStaleJobs(message: string): number {
+    const now = new Date().toISOString();
+    const result = this.database
+      .prepare(
+        `UPDATE scan_jobs
+        SET status = 'failed', error_message = ?, completed_at = ?, updated_at = ?
+        WHERE status IN ('pending', 'running')`
+      )
+      .run(message, now, now);
+    return result.changes;
+  }
+
   public getById(jobId: string): ScanJob | null {
     const row = this.database
-      .prepare(`SELECT
+      .prepare(
+        `SELECT
         id,
         root_path as rootPath,
         status,
@@ -178,7 +253,8 @@ export class ScanJobRepository {
         cancelled_at as cancelledAt,
         created_at as createdAt,
         updated_at as updatedAt
-      FROM scan_jobs WHERE id = ?`)
+      FROM scan_jobs WHERE id = ?`
+      )
       .get(jobId) as ScanJobRow | undefined;
 
     return row ? toScanJob(row) : null;
@@ -186,7 +262,8 @@ export class ScanJobRepository {
 
   public listRecent(limit = 10): readonly ScanJob[] {
     const rows = this.database
-      .prepare(`SELECT
+      .prepare(
+        `SELECT
         id,
         root_path as rootPath,
         status,
@@ -201,7 +278,8 @@ export class ScanJobRepository {
         cancelled_at as cancelledAt,
         created_at as createdAt,
         updated_at as updatedAt
-      FROM scan_jobs ORDER BY started_at DESC LIMIT ?`)
+      FROM scan_jobs ORDER BY started_at DESC LIMIT ?`
+      )
       .all(limit) as ScanJobRow[];
     return rows.map(toScanJob);
   }
@@ -209,9 +287,13 @@ export class ScanJobRepository {
 
 export class FileRepository {
   private readonly database: DatabaseSync;
+  private readonly insertStatement: ReturnType<DatabaseSync['prepare']>;
 
   public constructor(database: DatabaseSync) {
     this.database = database;
+    this.insertStatement = database.prepare(`INSERT INTO files (
+      id, job_id, absolute_path, file_name, extension, size_bytes, created_at, modified_at, category, created_record_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   }
 
   public insert(file: Omit<FileRecord, 'id' | 'createdRecordAt'>): FileRecord {
@@ -221,29 +303,26 @@ export class FileRepository {
       createdRecordAt: new Date().toISOString(),
     };
 
-    this.database
-      .prepare(`INSERT INTO files (
-        id, job_id, absolute_path, file_name, extension, size_bytes, created_at, modified_at, category, created_record_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(
-        record.id,
-        record.jobId,
-        record.absolutePath,
-        record.fileName,
-        record.extension,
-        record.sizeBytes,
-        record.createdAt,
-        record.modifiedAt,
-        record.category,
-        record.createdRecordAt
-      );
+    this.insertStatement.run(
+      record.id,
+      record.jobId,
+      record.absolutePath,
+      record.fileName,
+      record.extension,
+      record.sizeBytes,
+      record.createdAt,
+      record.modifiedAt,
+      record.category,
+      record.createdRecordAt
+    );
 
     return record;
   }
 
   public listByJobId(jobId: string, limit = 500): readonly FileRecord[] {
     const rows = this.database
-      .prepare(`SELECT
+      .prepare(
+        `SELECT
         id,
         job_id as jobId,
         absolute_path as absolutePath,
@@ -254,7 +333,8 @@ export class FileRepository {
         modified_at as modifiedAt,
         category,
         created_record_at as createdRecordAt
-      FROM files WHERE job_id = ? ORDER BY absolute_path ASC LIMIT ?`)
+      FROM files WHERE job_id = ? ORDER BY absolute_path ASC LIMIT ?`
+      )
       .all(jobId, limit) as FileRow[];
     return rows.map(toFileRecord);
   }
@@ -262,9 +342,13 @@ export class FileRepository {
 
 export class ScanEventRepository {
   private readonly database: DatabaseSync;
+  private readonly insertStatement: ReturnType<DatabaseSync['prepare']>;
 
   public constructor(database: DatabaseSync) {
     this.database = database;
+    this.insertStatement = database.prepare(
+      'INSERT INTO scan_events (id, job_id, level, event_type, message, path, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    );
   }
 
   public record(event: Omit<ScanEventRecord, 'id' | 'createdAt'>): ScanEventRecord {
@@ -274,11 +358,26 @@ export class ScanEventRepository {
       createdAt: new Date().toISOString(),
     };
 
-    this.database
-      .prepare('INSERT INTO scan_events (id, job_id, level, event_type, message, path, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-      .run(row.id, row.jobId, row.level, row.eventType, row.message, row.path, row.createdAt);
-
+    this.insertStatement.run(
+      row.id,
+      row.jobId,
+      row.level,
+      row.eventType,
+      row.message,
+      row.path,
+      row.createdAt
+    );
     return row;
+  }
+
+  public listByJobId(jobId: string, limit = 100): readonly ScanEventRecord[] {
+    const rows = this.database
+      .prepare(
+        `SELECT id, job_id as jobId, level, event_type as eventType, message, path, created_at as createdAt
+        FROM scan_events WHERE job_id = ? ORDER BY created_at DESC LIMIT ?`
+      )
+      .all(jobId, limit) as ScanEventRow[];
+    return rows.map(toScanEventRecord);
   }
 }
 
@@ -297,26 +396,97 @@ export interface ScannerController {
   readonly promise: Promise<ScanJob>;
 }
 
+export interface FileScannerOptions {
+  readonly progressEveryPaths?: number;
+  readonly progressEveryMs?: number;
+  readonly yieldEveryPaths?: number;
+  readonly logger?: Logger;
+}
+
+const isNodeError = (error: unknown): error is NodeJS.ErrnoException => error instanceof Error;
+
+const toErrorMessage = (error: unknown, fallback: string): string =>
+  error instanceof Error ? error.message : fallback;
+
+const classifyFsError = (
+  error: unknown
+): { eventType: string; level: 'warning' | 'error'; message: string } => {
+  const code = isNodeError(error) ? error.code : undefined;
+  switch (code) {
+    case 'EACCES':
+    case 'EPERM':
+      return {
+        eventType: 'permission_denied',
+        level: 'warning',
+        message: 'Permission denied while reading path.',
+      };
+    case 'ENOENT':
+      return {
+        eventType: 'path_missing',
+        level: 'warning',
+        message: 'Path disappeared during scan.',
+      };
+    case 'ENOTDIR':
+      return {
+        eventType: 'not_a_directory',
+        level: 'warning',
+        message: 'Expected a directory but found a non-directory path.',
+      };
+    case 'EIO':
+      return {
+        eventType: 'device_io_error',
+        level: 'error',
+        message: 'I/O error while reading path. The device may be unavailable.',
+      };
+    default:
+      return {
+        eventType: 'path_error',
+        level: 'warning',
+        message: toErrorMessage(error, 'Unable to access path.'),
+      };
+  }
+};
+
 export class FileScanner {
   private readonly jobs: ScanJobRepository;
   private readonly files: FileRepository;
   private readonly events: ScanEventRepository;
+  private readonly progressEveryPaths: number;
+  private readonly progressEveryMs: number;
+  private readonly yieldEveryPaths: number;
+  private readonly logger: Logger;
 
-  public constructor(jobs: ScanJobRepository, files: FileRepository, events: ScanEventRepository) {
+  public constructor(
+    jobs: ScanJobRepository,
+    files: FileRepository,
+    events: ScanEventRepository,
+    options: FileScannerOptions = {}
+  ) {
     this.jobs = jobs;
     this.files = files;
     this.events = events;
+    this.progressEveryPaths = options.progressEveryPaths ?? 25;
+    this.progressEveryMs = options.progressEveryMs ?? 250;
+    this.yieldEveryPaths = options.yieldEveryPaths ?? 100;
+    this.logger = options.logger ?? noopLogger;
   }
 
   public start(rootPath: string, callbacks: ScannerCallbacks = {}): ScannerController {
     const job = this.jobs.create(rootPath);
     let cancelled = false;
 
-    const promise = Promise.resolve().then(() => this.run(job.id, rootPath, () => cancelled, callbacks));
+    const promise = Promise.resolve().then(() =>
+      this.run(job.id, rootPath, () => cancelled, callbacks)
+    );
     return {
       jobId: job.id,
       cancel: () => {
         cancelled = true;
+        this.logger.info({
+          domain: 'scan',
+          message: 'Cancellation requested.',
+          context: { jobId: job.id, rootPath },
+        });
       },
       promise,
     };
@@ -330,72 +500,169 @@ export class FileScanner {
   ): Promise<ScanJob> {
     let activeJob = this.jobs.update(jobId, { status: 'running' });
     callbacks.onProgress?.({ job: activeJob });
-    await this.events.record({ jobId, level: 'info', eventType: 'scan_started', message: 'Scan started.', path: rootPath });
+    this.logger.info({ domain: 'scan', message: 'Scan started.', context: { jobId, rootPath } });
+    this.events.record({
+      jobId,
+      level: 'info',
+      eventType: 'scan_started',
+      message: 'Scan started.',
+      path: rootPath,
+    });
 
-    const discoveredFiles = await this.enumerateFiles(rootPath, jobId, isCancelled);
+    try {
+      const rootStats = await fs.lstat(rootPath);
+      if (!rootStats.isDirectory()) {
+        throw new Error('Selected root path is not a directory.');
+      }
+    } catch (error) {
+      return this.failJob(jobId, rootPath, error, callbacks);
+    }
+
+    const queue = [rootPath];
     let processedPaths = 0;
     let persistedFiles = 0;
     let scannedBytes = 0;
+    let maxQueueDepth = 1;
+    let lastProgressAt = 0;
 
-    for (const absolutePath of discoveredFiles) {
+    while (queue.length > 0) {
       if (isCancelled()) {
         activeJob = this.jobs.update(jobId, {
           status: 'cancelled',
           cancelledAt: new Date().toISOString(),
-          currentPath: absolutePath,
+          currentPath: activeJob.currentPath,
           percentComplete: Math.min(activeJob.percentComplete, 99),
         });
-        await this.events.record({
+        this.events.record({
           jobId,
           level: 'info',
           eventType: 'scan_cancelled',
           message: 'Scan cancelled by user.',
-          path: absolutePath,
+          path: activeJob.currentPath,
+        });
+        this.logger.info({
+          domain: 'scan',
+          message: 'Scan cancelled.',
+          context: { jobId, processedPaths, persistedFiles, scannedBytes },
         });
         callbacks.onProgress?.({ job: activeJob });
         callbacks.onComplete?.(activeJob);
         return activeJob;
       }
 
-      processedPaths += 1;
+      const currentPath = queue.shift();
+      if (!currentPath) {
+        break;
+      }
 
+      processedPaths += 1;
+      maxQueueDepth = Math.max(maxQueueDepth, queue.length + 1);
+
+      let currentStats;
       try {
-        const stats = await fs.stat(absolutePath, { bigint: false });
-        if (!stats.isFile()) {
+        currentStats = await fs.lstat(currentPath);
+      } catch (error) {
+        await this.recordFsWarning(jobId, currentPath, error);
+        activeJob = this.updateProgress(jobId, {
+          processedPaths,
+          persistedFiles,
+          scannedBytes,
+          currentPath,
+          queueLength: queue.length,
+        });
+        await this.emitProgressMaybe(
+          activeJob,
+          callbacks,
+          processedPaths,
+          () => {
+            lastProgressAt = Date.now();
+          },
+          lastProgressAt
+        );
+        continue;
+      }
+
+      if (currentStats.isSymbolicLink()) {
+        this.events.record({
+          jobId,
+          level: 'warning',
+          eventType: 'symlink_skipped',
+          message: 'Symlink skipped for safety.',
+          path: currentPath,
+        });
+        this.logger.warn({
+          domain: 'scan',
+          message: 'Skipped symlink.',
+          context: { jobId, path: currentPath },
+        });
+      } else if (currentStats.isDirectory()) {
+        let entries;
+        try {
+          entries = await fs.readdir(currentPath, { withFileTypes: true });
+        } catch (error) {
+          await this.recordFsWarning(jobId, currentPath, error);
+          activeJob = this.updateProgress(jobId, {
+            processedPaths,
+            persistedFiles,
+            scannedBytes,
+            currentPath,
+            queueLength: queue.length,
+          });
+          await this.emitProgressMaybe(
+            activeJob,
+            callbacks,
+            processedPaths,
+            () => {
+              lastProgressAt = Date.now();
+            },
+            lastProgressAt
+          );
           continue;
         }
 
-        const extension = path.extname(absolutePath).replace(/^\./u, '').toLowerCase();
-        this.files.insert({
-          jobId,
-          absolutePath,
-          fileName: path.basename(absolutePath),
-          extension,
-          sizeBytes: stats.size,
-          createdAt: toIsoString(stats.birthtimeMs),
-          modifiedAt: toIsoString(stats.mtimeMs),
-          category: guessFileCategory(extension),
-        });
-        persistedFiles += 1;
-        scannedBytes += stats.size;
-      } catch (error) {
-        await this.events.record({
-          jobId,
-          level: 'warning',
-          eventType: 'file_skipped',
-          message: error instanceof Error ? error.message : 'Unknown file error.',
-          path: absolutePath,
-        });
+        for (const entry of entries) {
+          queue.push(path.join(currentPath, entry.name));
+        }
+      } else if (currentStats.isFile()) {
+        try {
+          const extension = path.extname(currentPath).replace(/^\./u, '').toLowerCase();
+          this.files.insert({
+            jobId,
+            absolutePath: currentPath,
+            fileName: path.basename(currentPath),
+            extension,
+            sizeBytes: currentStats.size,
+            createdAt: toIsoString(currentStats.birthtimeMs),
+            modifiedAt: toIsoString(currentStats.mtimeMs),
+            category: guessFileCategory(extension),
+          });
+          persistedFiles += 1;
+          scannedBytes += currentStats.size;
+        } catch (error) {
+          await this.recordFsWarning(jobId, currentPath, error);
+        }
       }
 
-      activeJob = this.jobs.update(jobId, {
+      activeJob = this.updateProgress(jobId, {
         processedPaths,
-        discoveredFiles: persistedFiles,
+        persistedFiles,
         scannedBytes,
-        percentComplete: discoveredFiles.length === 0 ? 100 : Math.round((processedPaths / discoveredFiles.length) * 100),
-        currentPath: absolutePath,
+        currentPath,
+        queueLength: queue.length,
       });
-      callbacks.onProgress?.({ job: activeJob });
+      await this.emitProgressMaybe(
+        activeJob,
+        callbacks,
+        processedPaths,
+        () => {
+          lastProgressAt = Date.now();
+        },
+        lastProgressAt
+      );
+
+      if (processedPaths % this.yieldEveryPaths === 0) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
     }
 
     activeJob = this.jobs.update(jobId, {
@@ -407,74 +674,115 @@ export class FileScanner {
       discoveredFiles: persistedFiles,
       scannedBytes,
     });
-    await this.events.record({ jobId, level: 'info', eventType: 'scan_completed', message: 'Scan completed.', path: rootPath });
+    this.events.record({
+      jobId,
+      level: 'info',
+      eventType: 'scan_completed',
+      message: 'Scan completed.',
+      path: rootPath,
+    });
+    this.events.record({
+      jobId,
+      level: 'info',
+      eventType: 'scan_metrics',
+      message: `Processed ${processedPaths} paths and persisted ${persistedFiles} files.`,
+      path: rootPath,
+    });
+    this.logger.info({
+      domain: 'scan',
+      message: 'Scan completed.',
+      context: { jobId, rootPath, processedPaths, persistedFiles, scannedBytes, maxQueueDepth },
+    });
     callbacks.onProgress?.({ job: activeJob });
     callbacks.onComplete?.(activeJob);
     return activeJob;
   }
 
-  private async enumerateFiles(rootPath: string, jobId: string, isCancelled: () => boolean): Promise<string[]> {
-    const queue = [rootPath];
-    const files: string[] = [];
-
-    while (queue.length > 0) {
-      if (isCancelled()) {
-        break;
-      }
-
-      const currentPath = queue.shift();
-      if (!currentPath) {
-        break;
-      }
-
-      let entries;
-      try {
-        entries = await fs.readdir(currentPath, { withFileTypes: true });
-      } catch (error) {
-        await this.events.record({
-          jobId,
-          level: 'warning',
-          eventType: 'directory_skipped',
-          message: error instanceof Error ? error.message : 'Unable to read directory.',
-          path: currentPath,
-        });
-        continue;
-      }
-
-      for (const entry of entries) {
-        const absolutePath = path.join(currentPath, entry.name);
-        try {
-          if (entry.isSymbolicLink()) {
-            await this.events.record({
-              jobId,
-              level: 'warning',
-              eventType: 'symlink_skipped',
-              message: 'Symlink skipped for safety.',
-              path: absolutePath,
-            });
-            continue;
-          }
-
-          if (entry.isDirectory()) {
-            queue.push(absolutePath);
-            continue;
-          }
-
-          if (entry.isFile()) {
-            files.push(absolutePath);
-          }
-        } catch (error) {
-          await this.events.record({
-            jobId,
-            level: 'warning',
-            eventType: 'path_skipped',
-            message: error instanceof Error ? error.message : 'Unable to process path.',
-            path: absolutePath,
-          });
-        }
-      }
+  private updateProgress(
+    jobId: string,
+    metrics: {
+      processedPaths: number;
+      persistedFiles: number;
+      scannedBytes: number;
+      currentPath: string;
+      queueLength: number;
     }
+  ): ScanJob {
+    const denominator = metrics.processedPaths + metrics.queueLength;
+    const percentComplete =
+      denominator <= 0
+        ? 0
+        : Math.min(99, Math.max(1, Math.round((metrics.processedPaths / denominator) * 100)));
+    return this.jobs.update(jobId, {
+      processedPaths: metrics.processedPaths,
+      discoveredFiles: metrics.persistedFiles,
+      scannedBytes: metrics.scannedBytes,
+      percentComplete,
+      currentPath: metrics.currentPath,
+    });
+  }
 
-    return files;
+  private async emitProgressMaybe(
+    job: ScanJob,
+    callbacks: ScannerCallbacks,
+    processedPaths: number,
+    onEmit: () => void,
+    lastProgressAt: number
+  ): Promise<void> {
+    const now = Date.now();
+    if (
+      processedPaths <= 1 ||
+      processedPaths % this.progressEveryPaths === 0 ||
+      now - lastProgressAt >= this.progressEveryMs
+    ) {
+      callbacks.onProgress?.({ job });
+      onEmit();
+    }
+  }
+
+  private async recordFsWarning(jobId: string, targetPath: string, error: unknown): Promise<void> {
+    const classification = classifyFsError(error);
+    this.events.record({
+      jobId,
+      level: classification.level,
+      eventType: classification.eventType,
+      message: `${classification.message} ${toErrorMessage(error, '')}`.trim(),
+      path: targetPath,
+    });
+    this.logger[classification.level === 'error' ? 'error' : 'warn']({
+      domain: 'filesystem',
+      message: classification.message,
+      context: { jobId, path: targetPath, error: toErrorMessage(error, classification.message) },
+    });
+  }
+
+  private async failJob(
+    jobId: string,
+    rootPath: string,
+    error: unknown,
+    callbacks: ScannerCallbacks
+  ): Promise<ScanJob> {
+    const message = toErrorMessage(error, 'Scan failed to start.');
+    const failedJob = this.jobs.update(jobId, {
+      status: 'failed',
+      errorMessage: message,
+      currentPath: rootPath,
+      completedAt: new Date().toISOString(),
+    });
+    this.events.record({
+      jobId,
+      level: 'error',
+      eventType: 'scan_failed',
+      message,
+      path: rootPath,
+    });
+    this.logger.error({
+      domain: 'scan',
+      message: 'Scan failed.',
+      context: { jobId, rootPath, error: message },
+    });
+    callbacks.onProgress?.({ job: failedJob });
+    callbacks.onComplete?.(failedJob);
+    return failedJob;
   }
 }

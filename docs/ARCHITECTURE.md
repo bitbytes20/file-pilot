@@ -4,156 +4,94 @@
 
 FilePilot uses a **local-first, layered monorepo architecture**:
 
-- **Electron Main Process**: privileged runtime (file system, hashing workers, database, OS integrations).
-- **Preload Layer**: secure, typed IPC bridge exposing whitelisted capabilities.
-- **Renderer (React)**: UI, state orchestration, user workflows.
-- **Domain/Application Packages**: pure business logic and use cases independent of Electron.
-- **Infrastructure Package**: platform adapters (filesystem, recycle bin, sqlite, metadata parsers, logging).
+- **Electron Main Process**: privileged runtime (filesystem traversal, SQLite bootstrap, OS integration, structured logging).
+- **Preload Layer**: secure, typed IPC bridge exposing whitelisted capabilities only.
+- **Renderer**: UI state, workflow orchestration, recent scan visibility, progress, diagnostics, and failure presentation.
+- **Domain/Application Packages**: pure business logic and orchestration independent of Electron.
+- **Infrastructure Package**: scanner, repositories, filesystem handling, database bootstrap, and logging interfaces.
 
-## 2) Recommended Monorepo Structure
+## 2) Layer Responsibilities
 
-```text
-apps/
-  desktop/
-    src/main/            # Electron main bootstrapping, windows, IPC handlers
-    src/preload/         # Context bridge + IPC clients
-    src/renderer/        # React app, routes, views, state
-packages/
-  domain/                # Entities, value objects, domain services, invariants
-  application/           # Use-case services and orchestration pipelines
-  infrastructure/        # Adapters: fs, hash, db, recycle-bin, trash, metadata
-  ui/                    # Shared design system components
-  config/                # Shared eslint/tsconfig/vitest/playwright configs
-docs/
-  PRD.md
-  ARCHITECTURE.md
-  ROADMAP.md
-  TESTING_STRATEGY.md
-```
+### `packages/domain`
 
-## 3) Application Layers
+- scan/job/file/event types
+- category inference and pure rules
 
-1. **Presentation** (React screens + component tests)
-2. **Application Services** (commands/queries, transactional flow)
-3. **Domain** (rules, entities, policies)
-4. **Infrastructure** (Node/OS implementations)
-5. **Persistence** (SQLite + indexed tables)
+### `packages/application`
 
-## 4) Electron Responsibilities
+- scan coordination
+- stale job recovery orchestration on app restart
+- query/list flows for jobs, files, and diagnostic events
 
-### Main Process
-- Create windows and lifecycle management.
-- Register typed IPC handlers.
-- Execute privileged operations (scan traversal, file actions).
-- Manage worker threads for hash pipeline.
-- Persist index and audit logs.
+### `packages/infrastructure`
 
-### Renderer
-- User-facing workflows, previews, search/filter UI.
-- Never accesses Node APIs directly.
-- Calls exposed preload APIs only.
+- SQLite bootstrap and schema setup
+- scan job/file/event repositories
+- memory-safe breadth-first traversal
+- filesystem error classification and warning recording
+- structured logger contract used by Electron wiring
 
-### Preload
-- Strict API surface by domain (`scan`, `duplicates`, `search`, `actions`, `settings`).
-- Runtime input validation (e.g., zod).
-- One-way event channels for progress updates.
+### `packages/shared-contracts`
 
-## 5) IPC Design Principles
+- typed IPC channel names
+- request/response/event DTOs
+- boundary parsers for jobs, files, and scan diagnostics
 
-- Use request/response for commands/queries; event stream for long-running progress.
-- Versioned IPC contracts.
-- Domain-scoped channels, e.g. `scan:start`, `scan:progress`, `duplicates:getGroups`.
-- Validate every payload at IPC boundary.
-- No generic `invoke('run-anything', ...)` patterns.
+### `apps/desktop/main`
 
-## 6) Domain Model Suggestions
+- BrowserWindow creation
+- secure session/navigation defaults
+- typed IPC handler registration
+- userData/database/log path wiring
+- runtime initialization logging
 
-- `ScanSession` (id, roots, status, timestamps, stats)
-- `IndexedFile` (id, path, size, extension, category, hashState, contentHash)
-- `DuplicateGroup` (hash, fileIds, totalBytes, potentialSavings)
-- `ActionPlan` (id, operationType, items, dryRunSummary, createdBy)
-- `ActionExecution` (id, planId, status, perItemResult)
-- `TrashRecord` (id, originalPath, trashPath, deletedAt, sourceType)
-- `AuditEvent` (id, actor, command, payloadHash, outcome, timestamp)
+### `apps/desktop/preload`
 
-## 7) Data & Storage Design
+- narrow `window.filePilot` API only
+- renderer-safe event subscription helpers
+- no raw `ipcRenderer` exposure
 
-**Primary DB**: SQLite (WAL mode) via a typed ORM/query layer.
+### `apps/desktop/renderer`
 
-Core tables:
-- `scan_sessions`
-- `files`
-- `file_hashes`
-- `duplicate_groups`
-- `action_plans`
-- `action_executions`
-- `trash_records`
-- `audit_events`
-- `settings`
-- `feature_flags`
+- progress/status UI
+- clear completed/cancelled/failed state rendering
+- diagnostics event list for scan warnings and failures
+- test selectors for resilient Electron E2E coverage
 
-Indexing focus:
-- path, extension, category, size, mtime, hash columns.
-- composite indexes for common filters.
+## 3) Tranche D Runtime Hardening
 
-## 8) Scan / Index / Hash Pipeline
+Tranche D focuses on making the Tranche C scan pipeline reliable before duplicate hashing is added.
 
-1. **Discovery phase**: recursive traversal and metadata collection.
-2. **Candidate grouping**: group by size; singletons excluded from hash stage.
-3. **Quick hash (optional)**: first/last N KB for large candidate sets.
-4. **Full hash**: stream full file content (BLAKE3 recommended; SHA-256 fallback optional).
-5. **Duplicate finalization**: only full-hash matches become duplicate groups.
-6. **Persist + notify**: update DB and progress stream.
+Implemented hardening themes:
 
-Pipeline requirements:
-- Cancellable jobs.
-- Backpressure and worker-pool concurrency limits.
-- File-lock/read-error tolerant with explicit status.
+- **Stale in-progress recovery**: pending/running jobs are marked failed on restart.
+- **Failure visibility**: scan failures, cancellation, and warnings are persisted and shown in the UI.
+- **Operational logging**: database bootstrap, scan lifecycle, filesystem warnings, and desktop startup are written to structured logs.
+- **Performance guardrails**: the scanner walks incrementally instead of materializing the entire file tree up front, throttles progress updates, and yields periodically to reduce UI starvation risk.
+- **Packaged-runtime awareness**: SQLite initialization is deferred so unsupported runtimes fail with a clear message instead of crashing on import.
 
-## 9) File Operation Safety Design
+## 4) Security Invariants
 
-- All mutations go through `SafeFileOperationService`.
-- Two-phase execution:
-  1. Plan generation (`dryRun`) with impact summary.
-  2. Confirmed apply with per-item result logging.
-- Policy defaults:
-  - overwrite disabled
-  - destructive actions require second confirmation
-  - bulk threshold prompts (e.g., >100 files or >10 GB)
+- `contextIsolation: true`
+- `nodeIntegration: false`
+- preload-only renderer access
+- no generic raw IPC bridge
+- navigation locked to trusted origins
+- permissions denied by default
+- strict CSP applied to the renderer shell
 
-## 10) Trash / Recovery Design
+## 5) Scan Lifecycle Model
 
-- **Local fixed drives**: send deletions to Windows Recycle Bin.
-- **External drives**: move to `.filepilot-trash/<timestamp>/<uuid>/...` on source drive.
-- Persist `TrashRecord` for each move/delete.
-- Keep metadata for future restore path conflict resolution.
+1. Renderer selects a root folder through the typed preload API.
+2. Main process boots or reuses the scan runtime and database.
+3. Application layer starts a scan controller.
+4. Infrastructure traverses the tree breadth-first and records files/events incrementally.
+5. Progress/completion events stream back to the renderer.
+6. Renderer refreshes metrics, file results, and diagnostics.
+7. On restart, stale pending/running jobs are marked failed before new work starts.
 
-## 11) Logging & Diagnostics
+## 6) Known Tranche D Constraints
 
-- Structured logs (JSONL) with domains and correlation IDs.
-- Separate operational logs vs audit logs.
-- Redaction rules for sensitive path segments (optional setting).
-- Diagnostics bundle includes logs, app version, settings snapshot (excluding secrets).
-
-## 12) Security & Privacy
-
-- Context isolation enabled, nodeIntegration disabled in renderer.
-- Strict CSP and URL loading restrictions.
-- Signed builds for distribution.
-- Local-only by default; telemetry disabled unless explicit opt-in.
-- Path sanitization and symlink handling safeguards.
-
-## 13) Extensibility for External Drives and Android
-
-Use a `StorageProvider` interface with capability negotiation:
-- `LocalNtfsProvider`
-- `ExternalDriveProvider`
-- `AndroidMtpProvider` (future)
-
-Provider capabilities example:
-- supportsRecycleBin
-- supportsAtomicMove
-- supportsStreamingHash
-- supportsPreviewRead
-
-This avoids hardcoding local-drive assumptions into domain logic.
+- SQLite currently depends on `node:sqlite` support in the runtime.
+- Installer/signing work is intentionally deferred.
+- Duplicate detection has not started yet; Tranche D only hardens scan foundation behavior.

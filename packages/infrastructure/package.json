@@ -10,9 +10,12 @@
     "dev": "pnpm run build -- --watch",
     "lint": "eslint \"src/**/*.{ts,tsx}\"",
     "typecheck": "tsc -b",
-    "test": "vitest --run --passWithNoTests"
+    "test": "node --experimental-strip-types --test src/**/*.test.ts"
   },
   "devDependencies": {
     "@filepilot/config": "workspace:*"
+  },
+  "dependencies": {
+    "@filepilot/domain": "workspace:*"
   }
 }

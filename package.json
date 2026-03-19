@@ -11,7 +11,12 @@
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
     "tracker:entry": "node scripts/generate-tracker-entry.mjs",
-    "prepare": "husky install"
+    "prepare": "husky install",
+    "test:unit": "turbo run test --filter=!@filepilot/desktop-e2e",
+    "test:e2e": "pnpm --filter @filepilot/desktop run test:e2e",
+    "verify": "pnpm run lint && pnpm run typecheck && pnpm run test && pnpm run build",
+    "build:desktop": "pnpm --filter @filepilot/desktop run build",
+    "smoke:desktop": "pnpm --filter @filepilot/desktop run smoke:built"
   },
   "devDependencies": {
     "@filepilot/config": "workspace:*",

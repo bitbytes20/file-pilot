@@ -10,7 +10,12 @@
   },
   "include": ["src/renderer"],
   "references": [
-    { "path": "../../packages/ui" },
-    { "path": "../../packages/shared-contracts" }
-  ]
+    {
+      "path": "../../packages/ui"
+    },
+    {
+      "path": "../../packages/shared-contracts"
+    }
+  ],
+  "exclude": ["src/**/*.test.ts"]
 }

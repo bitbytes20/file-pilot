@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { buildFileRowsMarkup, formatBytes } from './index.ts';
+import { buildEventListMarkup, buildFileRowsMarkup, formatBytes } from './index.ts';
 
 describe('renderer helpers', () => {
   it('formats bytes for display', () => {
@@ -25,5 +25,23 @@ describe('renderer helpers', () => {
     assert.match(markup, /example\.txt/);
     assert.match(markup, /\/tmp\/example\.txt/);
     assert.match(markup, /42 B/);
+  });
+
+  it('builds diagnostics markup for scan events', () => {
+    const markup = buildEventListMarkup([
+      {
+        id: 'event-1',
+        jobId: 'job-1',
+        level: 'warning',
+        eventType: 'permission_denied',
+        message: 'Permission denied while reading path.',
+        path: '/tmp/private',
+        createdAt: '2026-03-19T00:00:00.000Z',
+      },
+    ]);
+
+    assert.match(markup, /permission_denied/);
+    assert.match(markup, /Permission denied while reading path\./);
+    assert.match(markup, /\/tmp\/private/);
   });
 });

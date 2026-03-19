@@ -7,21 +7,33 @@ Thanks for contributing.
 - Safety-first behavior for all file operations.
 - Local-first and privacy-preserving defaults.
 - Strong typing and explicit domain boundaries.
-- Test before merge.
+- Test and document changes before merge.
 
-## Workflow
+## Local workflow
 
-1. Create an issue (or pick one from roadmap).
-2. Open a branch with descriptive name.
-3. Implement with tests.
-4. Run checks locally.
-5. Open PR using template.
+1. Create or pick a roadmap/task issue.
+2. Make the smallest safe change that satisfies the tranche goal.
+3. Run the required checks.
+4. Update docs when behavior, build flow, or troubleshooting changes.
+5. Update `docs/IMPLEMENTATION_TRACKER.md` before committing.
 
-## Required Checks
+## Required checks
 
 - `pnpm run lint`
 - `pnpm run typecheck`
 - `pnpm run test`
+- `pnpm run build`
+- `pnpm run test:e2e` when the environment can launch Electron
+
+## Desktop-specific test helpers
+
+For deterministic local/E2E validation, the desktop app recognizes these environment overrides:
+
+- `FILEPILOT_USER_DATA_DIR`
+- `FILEPILOT_LOG_DIR`
+- `FILEPILOT_TEST_SELECTED_FOLDER`
+
+These are intended for test harnesses and isolated validation runs, not general product behavior.
 
 ## Commit Style
 
@@ -43,8 +55,9 @@ Use conventional commits where possible:
 
 ## Safety Expectations
 
-Changes affecting delete/move logic must include:
+Changes affecting scan, move, or delete logic must include:
 
-- dry-run behavior coverage
-- failure mode assertions
-- audit event assertions
+- explicit failure-mode handling
+- non-crashing behavior assertions where practical
+- user-visible state clarity for completion, cancellation, and failure
+- diagnostics/logging updates when operational behavior changes

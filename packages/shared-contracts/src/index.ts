@@ -1,4 +1,10 @@
-import type { FileCategory, FileRecord, ScanJob, ScanJobStatus } from '@filepilot/domain';
+import type {
+  FileCategory,
+  FileRecord,
+  ScanEventRecord,
+  ScanJob,
+  ScanJobStatus,
+} from '@filepilot/domain';
 
 export const ipcChannels = {
   appGetVersion: 'app:get-version',
@@ -7,6 +13,7 @@ export const ipcChannels = {
   scanGetJob: 'scan:getJob',
   scanListRecentJobs: 'scan:listRecentJobs',
   scanListFiles: 'scan:listFiles',
+  scanListEvents: 'scan:listEvents',
   scanCancel: 'scan:cancel',
   scanProgress: 'scan:progress',
   scanComplete: 'scan:complete',
@@ -34,6 +41,11 @@ export interface ScanListFilesRequest {
   readonly limit?: number;
 }
 
+export interface ScanListEventsRequest {
+  readonly jobId: string;
+  readonly limit?: number;
+}
+
 export interface ScanFileDto {
   readonly id: string;
   readonly absolutePath: string;
@@ -43,6 +55,16 @@ export interface ScanFileDto {
   readonly createdAt: string | null;
   readonly modifiedAt: string | null;
   readonly category: FileCategory;
+}
+
+export interface ScanEventDto {
+  readonly id: string;
+  readonly jobId: string;
+  readonly level: 'info' | 'warning' | 'error';
+  readonly eventType: string;
+  readonly message: string;
+  readonly path: string | null;
+  readonly createdAt: string;
 }
 
 export interface ScanJobDto {
@@ -78,6 +100,7 @@ export interface FilePilotApi {
   readonly getScanJob: (request: ScanGetJobRequest) => Promise<ScanJobDto | null>;
   readonly listRecentScanJobs: () => Promise<readonly ScanJobDto[]>;
   readonly listFilesForJob: (request: ScanListFilesRequest) => Promise<readonly ScanFileDto[]>;
+  readonly listEventsForJob: (request: ScanListEventsRequest) => Promise<readonly ScanEventDto[]>;
   readonly cancelScan: (request: ScanCancelRequest) => Promise<ScanJobDto | null>;
   readonly onScanProgress: (listener: (event: ScanProgressEvent) => void) => () => void;
   readonly onScanComplete: (listener: (event: ScanCompleteEvent) => void) => () => void;
@@ -109,6 +132,18 @@ const optionalString = (value: unknown): string | null => {
 const requireNumber = (value: unknown, field: string): number => {
   if (typeof value !== 'number' || Number.isNaN(value)) {
     throw new TypeError(`Expected ${field} to be a valid number.`);
+  }
+
+  return value;
+};
+
+const optionalPositiveInteger = (value: unknown, field: string): number | undefined => {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) {
+    throw new TypeError(`Expected ${field} to be a positive integer when provided.`);
   }
 
   return value;
@@ -153,19 +188,21 @@ export const parseScanListFilesRequest = (value: unknown): ScanListFilesRequest 
     throw new TypeError('Expected a list files request payload.');
   }
 
-  const limit = value.limit;
-  if (limit !== undefined && (typeof limit !== 'number' || !Number.isInteger(limit) || limit <= 0)) {
-    throw new TypeError('Expected limit to be a positive integer when provided.');
+  const limit = optionalPositiveInteger(value.limit, 'limit');
+  return limit === undefined
+    ? { jobId: requireString(value.jobId, 'jobId') }
+    : { jobId: requireString(value.jobId, 'jobId'), limit };
+};
+
+export const parseScanListEventsRequest = (value: unknown): ScanListEventsRequest => {
+  if (!isRecord(value)) {
+    throw new TypeError('Expected a list events request payload.');
   }
 
+  const limit = optionalPositiveInteger(value.limit, 'limit');
   return limit === undefined
-    ? {
-        jobId: requireString(value.jobId, 'jobId'),
-      }
-    : {
-        jobId: requireString(value.jobId, 'jobId'),
-        limit,
-      };
+    ? { jobId: requireString(value.jobId, 'jobId') }
+    : { jobId: requireString(value.jobId, 'jobId'), limit };
 };
 
 export const toScanJobDto = (job: ScanJob): ScanJobDto => ({
@@ -193,6 +230,16 @@ export const toScanFileDto = (file: FileRecord): ScanFileDto => ({
   createdAt: file.createdAt,
   modifiedAt: file.modifiedAt,
   category: file.category,
+});
+
+export const toScanEventDto = (event: ScanEventRecord): ScanEventDto => ({
+  id: event.id,
+  jobId: event.jobId,
+  level: event.level,
+  eventType: event.eventType,
+  message: event.message,
+  path: event.path,
+  createdAt: event.createdAt,
 });
 
 export const parseScanProgressEvent = (value: unknown): ScanProgressEvent => parseScanJobDto(value);
@@ -246,6 +293,28 @@ export const parseScanFileListResponse = (value: unknown): readonly ScanFileDto[
       createdAt: optionalString(entry.createdAt),
       modifiedAt: optionalString(entry.modifiedAt),
       category: requireString(entry.category, 'category') as FileCategory,
+    };
+  });
+};
+
+export const parseScanEventListResponse = (value: unknown): readonly ScanEventDto[] => {
+  if (!Array.isArray(value)) {
+    throw new TypeError('Expected an array of scan events.');
+  }
+
+  return value.map((entry) => {
+    if (!isRecord(entry)) {
+      throw new TypeError('Expected a scan event payload.');
+    }
+
+    return {
+      id: requireString(entry.id, 'event id'),
+      jobId: requireString(entry.jobId, 'jobId'),
+      level: requireString(entry.level, 'level') as ScanEventDto['level'],
+      eventType: requireString(entry.eventType, 'eventType'),
+      message: requireString(entry.message, 'message'),
+      path: optionalString(entry.path),
+      createdAt: requireString(entry.createdAt, 'createdAt'),
     };
   });
 };

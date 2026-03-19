@@ -1,53 +1,78 @@
 # FilePilot Testing Strategy
 
-## Recommended Testing Stack
+## Tranche D Test Matrix
 
-- **Unit/Integration**: Vitest
-- **React component tests**: Testing Library + Vitest + jsdom
-- **IPC contract tests**: Vitest (schema and runtime validation)
-- **E2E**: Playwright (Electron mode)
-- **Mocking/stubs**: `memfs`, temp directories, adapter mocks
-- **Coverage**: c8 / built-in Vitest coverage
+FilePilot now uses a pragmatic split:
 
-## Testing Pyramid
+- **Unit + integration**: Node test runner for application, infrastructure, shared IPC contracts, and desktop renderer helpers.
+- **Static quality gates**: ESLint + TypeScript project-reference builds across the monorepo.
+- **Desktop E2E**: Playwright Electron coverage for launch, real scan, cancellation, failure handling, and relaunch persistence.
+- **Windows build verification**: CI build-only validation on `windows-latest`.
 
-1. **Unit tests (60-70%)**
-   - Domain rules, filters, duplicate grouping logic, planner policies.
-2. **Integration tests (20-30%)**
-   - Scan pipeline with temp fixture trees.
-   - SQLite repository behavior.
-   - Safe action service with mocked storage providers.
-3. **Component tests (10-15%)**
-   - Duplicate list interactions, confirmation workflows, warning states.
-4. **E2E smoke tests (5-10%)**
-   - Launch app, run scan, review duplicates, perform safe delete dry-run.
+## Covered Critical Paths
 
-## Regression Safety for File Operations
+### Infrastructure / application
 
-- Maintain dedicated immutable fixture sets:
-  - renamed duplicate pairs
-  - same name + different content
-  - same size + different content
-  - mixed categories and nested folders
-- Assert pre/post filesystem snapshots.
-- Use dry-run tests as first-class gates.
-- Run mutation integration tests against temporary directories only.
+- real directory scan persistence
+- cancellation handling
+- stale running job recovery after restart
+- missing-root failure handling
+- symlink skip behavior
+- event repository persistence
 
-## Filesystem Mocking Guidance
+### Shared contracts
 
-- Domain tests: mock repository + provider interfaces.
-- Infrastructure tests: use temp dirs on real FS for path/permission realism.
-- Avoid unit tests that depend on host user files.
+- request parsing
+- positive-integer limit validation
+- event DTO parsing to catch IPC drift early
 
-## CI Quality Gates
+### Desktop renderer helpers
 
-- Lint + typecheck required.
-- Unit/integration/component test pass required.
-- E2E smoke on pull requests and nightly full suite.
-- Enforce coverage floor with progressive ratcheting.
+- byte formatting
+- file table markup
+- diagnostics markup
 
-## Suggested Initial Coverage Targets
+### Electron E2E intent
 
-- Domain/Application: 80%+
-- Infrastructure critical services: 70%+
-- UI workflows (critical paths): behavioral assertions over line coverage focus
+The Playwright suite targets:
+
+- app launch smoke
+- select folder → start real scan → inspect results
+- cancel scan mid-run
+- inaccessible/missing path failure state
+- relaunch persistence sanity
+
+## E2E Design Notes
+
+The suite uses a test-only environment override for folder selection:
+
+- `FILEPILOT_TEST_SELECTED_FOLDER`
+
+This keeps the production renderer and preload surface secure while still allowing deterministic automation of the folder-selection flow.
+
+Additional isolated runtime overrides:
+
+- `FILEPILOT_USER_DATA_DIR`
+- `FILEPILOT_LOG_DIR`
+
+## CI Gates
+
+Primary CI gates now include:
+
+- `pnpm run lint`
+- `pnpm run typecheck`
+- `pnpm run test`
+- `pnpm run build`
+- `pnpm run test:e2e` on Linux where Electron runtime dependencies are available
+- `pnpm run build:desktop` on Windows
+
+## Environment Caveat
+
+Electron E2E depends on native desktop libraries. If Electron cannot launch in the current environment, treat that as an environment limitation and verify:
+
+- lint
+- typecheck
+- unit/integration tests
+- production build output
+
+before diagnosing application logic.
