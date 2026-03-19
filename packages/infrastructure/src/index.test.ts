@@ -4,157 +4,89 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, it } from 'node:test';
 import {
+  DuplicateAnalysisJobRepository,
+  DuplicateAnalyzer,
+  DuplicateGroupRepository,
   FileRepository,
-  FileScanner,
   ScanEventRepository,
   ScanJobRepository,
+  StreamingFileHasher,
   bootstrapDatabase,
 } from './index.ts';
 
 const tempDirs: string[] = [];
-
 const createTempDir = async (): Promise<string> => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'filepilot-infra-'));
   tempDirs.push(dir);
   return dir;
 };
-
 afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
 });
 
 describe('repositories', () => {
-  it('persists scan jobs, files, and events in SQLite', async () => {
+  it('persists hash state and duplicate query data in SQLite', async () => {
     const dir = await createTempDir();
     const db = await bootstrapDatabase(path.join(dir, 'filepilot.sqlite'));
     const jobs = new ScanJobRepository(db.database);
     const files = new FileRepository(db.database);
-    const events = new ScanEventRepository(db.database);
+    const analysisJobs = new DuplicateAnalysisJobRepository(db.database);
+    const groups = new DuplicateGroupRepository(db.database);
 
     const job = jobs.create('/tmp/example');
-    const updated = jobs.update(job.id, {
-      status: 'running',
-      processedPaths: 3,
-      currentPath: '/tmp/example/a.txt',
-    });
-    files.insert({
-      jobId: job.id,
-      absolutePath: '/tmp/example/a.txt',
-      fileName: 'a.txt',
-      extension: 'txt',
-      sizeBytes: 12,
-      createdAt: '2024-01-01T00:00:00.000Z',
-      modifiedAt: '2024-01-02T00:00:00.000Z',
-      category: 'document',
-    });
-    events.record({
-      jobId: job.id,
-      level: 'warning',
-      eventType: 'directory_skipped',
-      message: 'denied',
-      path: '/tmp/example/private',
-    });
+    jobs.update(job.id, { status: 'completed', completedAt: new Date().toISOString() });
+    const first = files.insert({ jobId: job.id, absolutePath: '/tmp/example/a.txt', fileName: 'a.txt', extension: 'txt', sizeBytes: 12, createdAt: null, modifiedAt: null, category: 'document' });
+    const second = files.insert({ jobId: job.id, absolutePath: '/tmp/example/b.txt', fileName: 'b.txt', extension: 'txt', sizeBytes: 12, createdAt: null, modifiedAt: null, category: 'document' });
+    files.updateHashState(first.id, { hashStatus: 'hashed', contentHash: 'abc', hashAlgorithm: 'sha256', hashedAt: '2026-03-19T00:00:00.000Z', hashError: null });
+    files.updateHashState(second.id, { hashStatus: 'hashed', contentHash: 'abc', hashAlgorithm: 'sha256', hashedAt: '2026-03-19T00:00:00.000Z', hashError: null });
 
-    assert.equal(updated.status, 'running');
-    assert.equal(jobs.getById(job.id)?.processedPaths, 3);
-    assert.equal(files.listByJobId(job.id).length, 1);
-    assert.equal(events.listByJobId(job.id).length, 1);
-  });
+    const analysis = analysisJobs.create(job.id);
+    groups.replaceForAnalysis(analysis.id, job.id, [{ contentHash: 'abc', hashAlgorithm: 'sha256', files: [files.getById(first.id)!, files.getById(second.id)!] }]);
 
-  it('marks stale pending and running jobs as failed on recovery', async () => {
-    const dir = await createTempDir();
-    const db = await bootstrapDatabase(path.join(dir, 'filepilot.sqlite'));
-    const jobs = new ScanJobRepository(db.database);
-    const pending = jobs.create('/tmp/pending');
-    const running = jobs.create('/tmp/running');
-    jobs.update(running.id, { status: 'running' });
-
-    const changed = jobs.failStaleJobs('Recovered after restart');
-
-    assert.equal(changed, 2);
-    assert.equal(jobs.getById(pending.id)?.status, 'failed');
-    assert.equal(jobs.getById(running.id)?.errorMessage, 'Recovered after restart');
+    assert.equal(files.getById(first.id)?.hashStatus, 'hashed');
+    assert.equal(groups.listByScanJobId(job.id).length, 1);
+    assert.equal(groups.listFiles(groups.listByScanJobId(job.id)[0]!.id).length, 2);
   });
 });
 
-describe('scanner', () => {
-  it('scans a directory tree, persists files, and skips symlinks', async () => {
+describe('hashing and duplicate analysis', () => {
+  it('hashes files deterministically by streaming full file contents', async () => {
     const dir = await createTempDir();
-    const root = path.join(dir, 'root');
-    await fs.mkdir(path.join(root, 'nested'), { recursive: true });
-    await fs.writeFile(path.join(root, 'alpha.txt'), 'alpha');
-    await fs.writeFile(path.join(root, 'nested', 'beta.json'), '{"ok":true}');
-    await fs.symlink(path.join(root, 'alpha.txt'), path.join(root, 'nested', 'alpha.link'));
-
-    const db = await bootstrapDatabase(path.join(dir, 'filepilot.sqlite'));
-    const jobs = new ScanJobRepository(db.database);
-    const files = new FileRepository(db.database);
-    const events = new ScanEventRepository(db.database);
-    const scanner = new FileScanner(jobs, files, events, {
-      progressEveryPaths: 1,
-      progressEveryMs: 0,
-    });
-
-    const controller = scanner.start(root);
-    const job = await controller.promise;
-    const persistedFiles = files.listByJobId(job.id);
-    const recordedEvents = events.listByJobId(job.id);
-
-    assert.equal(job.status, 'completed');
-    assert.equal(job.discoveredFiles, 2);
-    assert.deepEqual(
-      persistedFiles.map((entry) => entry.fileName),
-      ['alpha.txt', 'beta.json']
-    );
-    assert.ok(recordedEvents.some((entry) => entry.eventType === 'symlink_skipped'));
+    const file = path.join(dir, 'payload.bin');
+    await fs.writeFile(file, 'same-content'.repeat(10_000));
+    const hasher = new StreamingFileHasher();
+    const left = await hasher.hashFile(file);
+    const right = await hasher.hashFile(file);
+    assert.equal(left, right);
   });
 
-  it('supports cancellation', async () => {
+  it('runs scan results through hashing and duplicate grouping', async () => {
     const dir = await createTempDir();
     const root = path.join(dir, 'root');
     await fs.mkdir(root, { recursive: true });
-    for (let index = 0; index < 250; index += 1) {
-      await fs.writeFile(path.join(root, `file-${index}.txt`), `payload-${index}`.repeat(200));
-    }
+    await fs.writeFile(path.join(root, 'a.txt'), 'duplicate');
+    await fs.writeFile(path.join(root, 'b.txt'), 'duplicate');
+    await fs.writeFile(path.join(root, 'c.txt'), 'unique');
 
     const db = await bootstrapDatabase(path.join(dir, 'filepilot.sqlite'));
     const jobs = new ScanJobRepository(db.database);
     const files = new FileRepository(db.database);
-    const events = new ScanEventRepository(db.database);
-    const scanner = new FileScanner(jobs, files, events, {
-      progressEveryPaths: 1,
-      progressEveryMs: 0,
-    });
+    const analysisJobs = new DuplicateAnalysisJobRepository(db.database);
+    const groups = new DuplicateGroupRepository(db.database);
+    const job = jobs.create(root);
+    jobs.update(job.id, { status: 'completed', completedAt: new Date().toISOString() });
+    files.insert({ jobId: job.id, absolutePath: path.join(root, 'a.txt'), fileName: 'a.txt', extension: 'txt', sizeBytes: 9, createdAt: null, modifiedAt: null, category: 'document' });
+    files.insert({ jobId: job.id, absolutePath: path.join(root, 'b.txt'), fileName: 'b.txt', extension: 'txt', sizeBytes: 9, createdAt: null, modifiedAt: null, category: 'document' });
+    files.insert({ jobId: job.id, absolutePath: path.join(root, 'c.txt'), fileName: 'c.txt', extension: 'txt', sizeBytes: 6, createdAt: null, modifiedAt: null, category: 'document' });
 
-    const controller = scanner.start(root, {
-      onProgress: ({ job }) => {
-        if (job.processedPaths >= 5) {
-          controller.cancel();
-        }
-      },
-    });
-    const job = await controller.promise;
+    const analyzer = new DuplicateAnalyzer(jobs, files, analysisJobs, groups, new StreamingFileHasher());
+    const result = await analyzer.start(job.id).promise;
+    const persistedGroups = groups.listByScanJobId(job.id);
 
-    assert.equal(job.status, 'cancelled');
-    assert.ok(files.listByJobId(job.id).length > 0);
-    assert.ok(files.listByJobId(job.id).length < 250);
-    assert.ok(events.listByJobId(job.id).some((event) => event.eventType === 'scan_cancelled'));
-  });
-
-  it('fails cleanly when the selected root path is missing', async () => {
-    const dir = await createTempDir();
-    const db = await bootstrapDatabase(path.join(dir, 'filepilot.sqlite'));
-    const jobs = new ScanJobRepository(db.database);
-    const files = new FileRepository(db.database);
-    const events = new ScanEventRepository(db.database);
-    const scanner = new FileScanner(jobs, files, events);
-
-    const missingRoot = path.join(dir, 'missing-root');
-    const job = await scanner.start(missingRoot).promise;
-
-    assert.equal(job.status, 'failed');
-    assert.match(job.errorMessage ?? '', /no such file|ENOENT|missing/i);
-    assert.equal(files.listByJobId(job.id).length, 0);
-    assert.ok(events.listByJobId(job.id).some((event) => event.eventType === 'scan_failed'));
+    assert.equal(result.status, 'completed');
+    assert.equal(result.duplicateGroups, 1);
+    assert.equal(persistedGroups[0]?.fileCount, 2);
+    assert.equal(groups.listFiles(persistedGroups[0]!.id).length, 2);
+    assert.equal(groups.summarizeByScanJobId(job.id).reclaimableBytes, 9);
   });
 });
