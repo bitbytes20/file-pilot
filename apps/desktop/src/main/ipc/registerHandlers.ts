@@ -1,45 +1,43 @@
-import { randomUUID } from 'node:crypto';
-import { BrowserWindow, dialog, ipcMain, type OpenDialogOptions } from 'electron';
+import path from 'node:path';
+import { app, BrowserWindow, dialog, ipcMain, type OpenDialogOptions } from 'electron';
+import { ScanCoordinator } from '@filepilot/application';
+import {
+  FileRepository,
+  FileScanner,
+  ScanEventRepository,
+  ScanJobRepository,
+  bootstrapDatabase,
+} from '@filepilot/infrastructure';
 import {
   ipcChannels,
+  parseScanCancelRequest,
+  parseScanGetJobRequest,
+  parseScanListFilesRequest,
   parseScanStartRequest,
+  toScanFileDto,
+  toScanJobDto,
   type FolderSelectionResult,
-  type ScanCompleteEvent,
-  type ScanProgressEvent,
-  type ScanSession,
 } from '@filepilot/shared-contracts';
 
-const mockScanSteps = 5;
-const mockScanDelayMs = 250;
-
-const buildProgressEvent = (session: ScanSession, step: number): ScanProgressEvent => ({
-  sessionId: session.sessionId,
-  processedPaths: step * 24,
-  discoveredFiles: step * 19,
-  scannedBytes: step * 128 * 1024 * 1024,
-  percentComplete: Math.round((step / mockScanSteps) * 100),
-  currentPath: `${session.rootPath}/mock-item-${step}`,
-});
-
-const buildCompleteEvent = (
-  session: ScanSession,
-  lastProgress: ScanProgressEvent
-): ScanCompleteEvent => ({
-  sessionId: session.sessionId,
-  processedPaths: lastProgress.processedPaths,
-  discoveredFiles: lastProgress.discoveredFiles,
-  scannedBytes: lastProgress.scannedBytes,
-  completedAt: new Date().toISOString(),
-  rootPath: session.rootPath,
-});
-
-const delay = (ms: number) =>
-  new Promise<void>((resolve) => {
-    setTimeout(resolve, ms);
-  });
+let scanCoordinatorPromise: Promise<ScanCoordinator> | null = null;
 
 const getActiveWindow = (): BrowserWindow | null =>
   BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null;
+
+const getScanCoordinator = async (): Promise<ScanCoordinator> => {
+  if (!scanCoordinatorPromise) {
+    scanCoordinatorPromise = (async () => {
+      const database = await bootstrapDatabase(path.join(app.getPath('userData'), 'filepilot.sqlite'));
+      const jobs = new ScanJobRepository(database.database);
+      const files = new FileRepository(database.database);
+      const events = new ScanEventRepository(database.database);
+      const scanner = new FileScanner(jobs, files, events);
+      return new ScanCoordinator({ scanner, jobs, files });
+    })();
+  }
+
+  return scanCoordinatorPromise;
+};
 
 export const registerIpcHandlers = (): void => {
   ipcMain.handle(ipcChannels.appGetVersion, () => process.versions.electron);
@@ -60,34 +58,52 @@ export const registerIpcHandlers = (): void => {
     };
   });
 
-  ipcMain.handle(
-    ipcChannels.scanStartMock,
-    async (_event, payload: unknown): Promise<ScanSession> => {
-      const request = parseScanStartRequest(payload);
-      const session: ScanSession = {
-        sessionId: randomUUID(),
-        rootPath: request.rootPath,
-        startedAt: new Date().toISOString(),
-      };
+  ipcMain.handle(ipcChannels.scanStart, async (event, payload: unknown) => {
+    const { rootPath } = parseScanStartRequest(payload);
+    const scanCoordinator = await getScanCoordinator();
+    const window = BrowserWindow.fromWebContents(event.sender);
+    const job = await scanCoordinator.startScan(rootPath, {
+      onProgress: (nextJob) => {
+        window?.webContents.send(ipcChannels.scanProgress, toScanJobDto(nextJob));
+      },
+      onComplete: (nextJob) => {
+        window?.webContents.send(ipcChannels.scanComplete, {
+          jobId: nextJob.id,
+          status: nextJob.status,
+          completedAt: nextJob.completedAt,
+          cancelledAt: nextJob.cancelledAt,
+          errorMessage: nextJob.errorMessage,
+        });
+      },
+    });
 
-      const window = BrowserWindow.fromWebContents(_event.sender);
+    return toScanJobDto(job);
+  });
 
-      void (async () => {
-        let latestProgress = buildProgressEvent(session, 1);
+  ipcMain.handle(ipcChannels.scanGetJob, async (_event, payload: unknown) => {
+    const request = parseScanGetJobRequest(payload);
+    const scanCoordinator = await getScanCoordinator();
+    const job = await scanCoordinator.getScanJob(request.jobId);
+    return job ? toScanJobDto(job) : null;
+  });
 
-        for (let step = 1; step <= mockScanSteps; step += 1) {
-          latestProgress = buildProgressEvent(session, step);
-          window?.webContents.send(ipcChannels.scanProgress, latestProgress);
-          await delay(mockScanDelayMs);
-        }
+  ipcMain.handle(ipcChannels.scanListRecentJobs, async () => {
+    const scanCoordinator = await getScanCoordinator();
+    const jobs = await scanCoordinator.listRecentJobs();
+    return jobs.map((job) => toScanJobDto(job));
+  });
 
-        window?.webContents.send(
-          ipcChannels.scanComplete,
-          buildCompleteEvent(session, latestProgress)
-        );
-      })();
+  ipcMain.handle(ipcChannels.scanListFiles, async (_event, payload: unknown) => {
+    const request = parseScanListFilesRequest(payload);
+    const scanCoordinator = await getScanCoordinator();
+    const files = await scanCoordinator.listFilesForJob(request.jobId, request.limit);
+    return files.map((file) => toScanFileDto(file));
+  });
 
-      return session;
-    }
-  );
+  ipcMain.handle(ipcChannels.scanCancel, async (_event, payload: unknown) => {
+    const request = parseScanCancelRequest(payload);
+    const scanCoordinator = await getScanCoordinator();
+    const job = await scanCoordinator.cancelScan(request.jobId);
+    return job ? toScanJobDto(job) : null;
+  });
 };
