@@ -1,4 +1,10 @@
 import type {
+  DuplicateAnalysisCompleteEvent,
+  DuplicateAnalysisJobDto,
+  DuplicateAnalysisProgressEvent,
+  DuplicateGroupDto,
+  DuplicateGroupFileDto,
+  DuplicateSummaryDto,
   ScanCompleteEvent,
   ScanEventDto,
   ScanFileDto,
@@ -7,172 +13,171 @@ import type {
 } from '@filepilot/shared-contracts';
 
 export const formatBytes = (value: number): string => {
-  if (value === 0) {
-    return '0 B';
-  }
-
+  if (value === 0) return '0 B';
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
   const exponent = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1);
   const amount = value / 1024 ** exponent;
   return `${amount.toFixed(exponent === 0 ? 0 : 1)} ${units[exponent]}`;
 };
 
+const formatDateTime = (value: string | null): string => (value ? new Date(value).toLocaleString() : '—');
+
 export const buildFileRowsMarkup = (entries: readonly ScanFileDto[]): string =>
   entries.length === 0
-    ? '<tr><td colspan="3" style="padding: 12px; color: #8b96a9;">No files persisted for this scan yet.</td></tr>'
-    : entries
-        .map(
-          (file) => `
-            <tr>
-              <td style="padding: 10px; border-bottom: 1px solid #1d2430; vertical-align: top;">
-                <div style="font-weight: 600; color: #e6edfa;">${file.fileName}</div>
-                <div style="color: #8b96a9; word-break: break-all; margin-top: 4px;">${file.absolutePath}</div>
-              </td>
-              <td style="padding: 10px; border-bottom: 1px solid #1d2430; text-transform: capitalize;">${file.category}</td>
-              <td style="padding: 10px; border-bottom: 1px solid #1d2430;">${formatBytes(file.sizeBytes)}</td>
-            </tr>`
-        )
-        .join('');
+    ? '<tr><td colspan="4" style="padding: 12px; color: #8b96a9;">No files persisted for this scan yet.</td></tr>'
+    : entries.map((file) => `
+        <tr>
+          <td style="padding:10px; border-bottom:1px solid #1d2430;"><div style="font-weight:600; color:#e6edfa;">${file.fileName}</div><div style="color:#8b96a9; word-break:break-all; margin-top:4px;">${file.absolutePath}</div></td>
+          <td style="padding:10px; border-bottom:1px solid #1d2430; text-transform:capitalize;">${file.category}</td>
+          <td style="padding:10px; border-bottom:1px solid #1d2430;">${formatBytes(file.sizeBytes)}</td>
+          <td style="padding:10px; border-bottom:1px solid #1d2430; text-transform:capitalize;">${file.hashStatus}</td>
+        </tr>`).join('');
 
 export const buildEventListMarkup = (entries: readonly ScanEventDto[]): string =>
   entries.length === 0
-    ? '<li style="padding: 12px; color: #8b96a9; list-style: none;">No diagnostics recorded for this scan yet.</li>'
-    : entries
-        .map(
-          (event) => `
-            <li style="list-style: none; border: 1px solid #222c3b; border-radius: 12px; padding: 12px; background: #101620;">
-              <div style="display: flex; justify-content: space-between; gap: 12px; margin-bottom: 6px;">
-                <strong style="text-transform: uppercase; font-size: 12px; color: ${
-                  event.level === 'error'
-                    ? '#ff8f8f'
-                    : event.level === 'warning'
-                      ? '#ffd27d'
-                      : '#9eb6ff'
-                }">${event.level}</strong>
-                <span style="color: #7e8aa0; font-size: 12px;">${new Date(event.createdAt).toLocaleString()}</span>
-              </div>
-              <div style="font-weight: 600; margin-bottom: 4px;">${event.eventType}</div>
-              <div style="color: #dfe7f5; margin-bottom: 4px;">${event.message}</div>
-              ${event.path ? `<div style="color: #8b96a9; word-break: break-all; font-size: 12px;">${event.path}</div>` : ''}
-            </li>`
-        )
-        .join('');
+    ? '<li style="padding:12px; color:#8b96a9; list-style:none;">No diagnostics recorded for this scan yet.</li>'
+    : entries.map((event) => `
+      <li style="list-style:none; border:1px solid #222c3b; border-radius:12px; padding:12px; background:#101620;">
+        <div style="display:flex; justify-content:space-between; gap:12px; margin-bottom:6px;">
+          <strong style="text-transform:uppercase; font-size:12px; color:${event.level === 'error' ? '#ff8f8f' : event.level === 'warning' ? '#ffd27d' : '#9eb6ff'}">${event.level}</strong>
+          <span style="color:#7e8aa0; font-size:12px;">${new Date(event.createdAt).toLocaleString()}</span>
+        </div>
+        <div style="font-weight:600; margin-bottom:4px;">${event.eventType}</div>
+        <div style="color:#dfe7f5; margin-bottom:4px;">${event.message}</div>
+        ${event.path ? `<div style="color:#8b96a9; word-break:break-all; font-size:12px;">${event.path}</div>` : ''}
+      </li>`).join('');
+
+export const buildDuplicateGroupMarkup = (entries: readonly DuplicateGroupDto[], selectedGroupId: string | null): string =>
+  entries.length === 0
+    ? '<p style="margin:0; color:#8b96a9;">No exact duplicate groups found yet.</p>'
+    : entries.map((group) => `
+      <button data-group-id="${group.id}" style="text-align:left; width:100%; appearance:none; border:1px solid ${group.id === selectedGroupId ? '#4b74ff' : '#273041'}; background:#101620; color:white; border-radius:12px; padding:14px; cursor:pointer;">
+        <div style="display:flex; justify-content:space-between; gap:12px; margin-bottom:6px;">
+          <strong>${group.fileCount} exact matches</strong>
+          <span style="color:#8aa4ff;">${formatBytes(group.reclaimableBytes)} reclaimable</span>
+        </div>
+        <div style="color:#8b96a9; font-size:12px;">${formatBytes(group.totalBytes)} total · ${group.hashAlgorithm.toUpperCase()}</div>
+        <div style="color:#7e8aa0; font-size:11px; margin-top:8px; word-break:break-all;">${group.contentHash}</div>
+      </button>`).join('');
+
+export const buildDuplicateGroupFileMarkup = (entries: readonly DuplicateGroupFileDto[]): string =>
+  entries.length === 0
+    ? '<li style="list-style:none; color:#8b96a9;">Select a duplicate group to inspect matching files.</li>'
+    : entries.map((file) => `
+      <li style="list-style:none; border:1px solid #222c3b; border-radius:12px; padding:12px; background:#101620;">
+        <div style="display:flex; justify-content:space-between; gap:12px; margin-bottom:6px;">
+          <strong>${file.fileName}</strong>
+          <span style="color:${file.isKeepRecommendation ? '#8be7a5' : '#8aa4ff'};">${file.isKeepRecommendation ? 'Keep candidate' : 'Review copy'}</span>
+        </div>
+        <div style="color:#8b96a9; word-break:break-all; margin-bottom:8px;">${file.absolutePath}</div>
+        <div style="display:flex; gap:16px; flex-wrap:wrap; color:#cdd6e3; font-size:12px;">
+          <span>Size: ${formatBytes(file.sizeBytes)}</span>
+          <span>Modified: ${formatDateTime(file.modifiedAt)}</span>
+          <span>Created: ${formatDateTime(file.createdAt)}</span>
+        </div>
+      </li>`).join('');
 
 const queryRequired = <T extends Element>(selector: string): T => {
   const element = document.querySelector<T>(selector);
-  if (!element) {
-    throw new Error(`Missing required element: ${selector}`);
-  }
-
+  if (!element) throw new Error(`Missing required element: ${selector}`);
   return element;
 };
 
 const describeJobStatus = (job: ScanJobDto): string => {
   switch (job.status) {
-    case 'completed':
-      return `Completed · ${job.discoveredFiles} files indexed`;
-    case 'cancelled':
-      return `Cancelled · ${job.discoveredFiles} files indexed before stop`;
-    case 'failed':
-      return `Failed · ${job.errorMessage ?? 'Unknown failure'}`;
-    case 'running':
-      return `Running · ${job.percentComplete}%`;
-    default:
-      return 'Pending';
+    case 'completed': return `Completed · ${job.discoveredFiles} files indexed`;
+    case 'cancelled': return `Cancelled · ${job.discoveredFiles} files indexed before stop`;
+    case 'failed': return `Failed · ${job.errorMessage ?? 'Unknown failure'}`;
+    case 'running': return `Running · ${job.percentComplete}%`;
+    default: return 'Pending';
+  }
+};
+
+const describeDuplicateStatus = (job: DuplicateAnalysisJobDto | null): string => {
+  if (!job) return 'No duplicate analysis run yet.';
+  switch (job.status) {
+    case 'completed': return `Completed · ${job.duplicateGroups} groups · ${formatBytes(job.reclaimableBytes)} reclaimable`;
+    case 'cancelled': return 'Duplicate analysis cancelled.';
+    case 'failed': return `Analysis failed · ${job.errorMessage ?? 'Unknown failure'}`;
+    case 'running': return `Hashing ${job.hashedFiles}/${job.totalCandidates} candidate files · ${job.progressPercent}%`;
+    default: return 'Ready to analyze exact duplicates.';
   }
 };
 
 export const bootstrapRenderer = (): void => {
-  const app = document.querySelector<HTMLDivElement>('#app');
-  if (!app) {
-    throw new Error('Renderer root element was not found.');
-  }
-
+  const app = queryRequired<HTMLDivElement>('#app');
   app.innerHTML = `
-    <main style="max-width: 1280px; margin: 0 auto; padding: 40px 24px 64px;" data-testid="app-shell">
-      <header style="margin-bottom: 24px;">
-        <p style="margin: 0 0 8px; color: #8aa4ff; font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase;">Tranche D hardened scan foundation</p>
-        <h1 style="margin: 0; font-size: 40px;">FilePilot scan pipeline</h1>
-        <p id="version" data-testid="version" style="margin: 12px 0 0; color: #a8b0bf;"></p>
+    <main style="max-width:1400px; margin:0 auto; padding:40px 24px 64px;" data-testid="app-shell">
+      <header style="margin-bottom:24px;">
+        <p style="margin:0 0 8px; color:#8aa4ff; font-size:12px; letter-spacing:0.12em; text-transform:uppercase;">Tranche E duplicate detection foundation</p>
+        <h1 style="margin:0; font-size:40px;">FilePilot scan + duplicate review</h1>
+        <p id="version" data-testid="version" style="margin:12px 0 0; color:#a8b0bf;"></p>
       </header>
-
-      <section style="display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.95fr); gap: 20px; align-items: start;">
-        <div style="display: grid; gap: 20px;">
-          <section style="background: rgba(24, 30, 40, 0.92); border: 1px solid #2a3240; border-radius: 18px; padding: 24px; box-shadow: 0 18px 40px rgba(0,0,0,0.25);">
-            <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-bottom: 18px;">
-              <button id="select-folder" data-testid="select-folder" style="appearance: none; border: 0; border-radius: 10px; background: #4b74ff; color: white; padding: 12px 16px; font-weight: 600; cursor: pointer;">Select folder</button>
-              <button id="start-scan" data-testid="start-scan" style="appearance: none; border: 1px solid #3a4354; border-radius: 10px; background: #161b24; color: white; padding: 12px 16px; font-weight: 600; cursor: pointer;" disabled>Start scan</button>
-              <button id="cancel-scan" data-testid="cancel-scan" style="appearance: none; border: 1px solid #735656; border-radius: 10px; background: #241616; color: white; padding: 12px 16px; font-weight: 600; cursor: pointer;" disabled>Cancel</button>
-              <span id="folder-path" data-testid="folder-path" style="color: #cdd6e3; word-break: break-all;">No folder selected.</span>
+      <section style="display:grid; grid-template-columns:minmax(0,1.2fr) minmax(360px,0.9fr); gap:20px; align-items:start;">
+        <div style="display:grid; gap:20px;">
+          <section style="background:rgba(24,30,40,0.92); border:1px solid #2a3240; border-radius:18px; padding:24px;">
+            <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:center; margin-bottom:18px;">
+              <button id="select-folder" data-testid="select-folder">Select folder</button>
+              <button id="start-scan" data-testid="start-scan" disabled>Start scan</button>
+              <button id="cancel-scan" data-testid="cancel-scan" disabled>Cancel scan</button>
+              <button id="start-duplicate-analysis" data-testid="start-duplicate-analysis" disabled>Analyze duplicates</button>
+              <button id="cancel-duplicate-analysis" data-testid="cancel-duplicate-analysis" disabled>Cancel analysis</button>
+              <span id="folder-path" data-testid="folder-path" style="color:#cdd6e3; word-break:break-all;">No folder selected.</span>
             </div>
-
-            <div style="margin-bottom: 18px;">
-              <div style="display: flex; justify-content: space-between; margin-bottom: 8px; color: #a8b0bf;">
-                <span>Status</span>
-                <span id="progress-label" data-testid="progress-label">Idle</span>
+            <div style="display:grid; gap:16px;">
+              <div>
+                <div style="display:flex; justify-content:space-between; margin-bottom:8px; color:#a8b0bf;"><span>Scan status</span><span id="progress-label" data-testid="progress-label">Idle</span></div>
+                <div style="height:12px; background:#0f131a; border-radius:999px; overflow:hidden; border:1px solid #273041;"><div id="progress-bar" data-testid="progress-bar" style="height:100%; width:0%; background:linear-gradient(90deg,#4b74ff,#73e0ff);"></div></div>
               </div>
-              <div style="height: 12px; background: #0f131a; border-radius: 999px; overflow: hidden; border: 1px solid #273041;">
-                <div id="progress-bar" data-testid="progress-bar" style="height: 100%; width: 0%; background: linear-gradient(90deg, #4b74ff, #73e0ff);"></div>
-              </div>
-            </div>
-
-            <div id="status-banner" data-testid="status-banner" style="padding: 14px 16px; border-radius: 14px; background: #0f131a; border: 1px solid #222c3b; margin-bottom: 18px; color: #dfe7f5;">Waiting for a scan.</div>
-
-            <dl style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 0 0 18px;">
-              <div style="padding: 16px; border-radius: 14px; background: #121720; border: 1px solid #222c3b;"><dt style="color: #7e8aa0; margin-bottom: 6px;">Paths</dt><dd id="paths-value" data-testid="paths-value" style="margin: 0; font-size: 26px;">0</dd></div>
-              <div style="padding: 16px; border-radius: 14px; background: #121720; border: 1px solid #222c3b;"><dt style="color: #7e8aa0; margin-bottom: 6px;">Files</dt><dd id="files-value" data-testid="files-value" style="margin: 0; font-size: 26px;">0</dd></div>
-              <div style="padding: 16px; border-radius: 14px; background: #121720; border: 1px solid #222c3b;"><dt style="color: #7e8aa0; margin-bottom: 6px;">Bytes</dt><dd id="bytes-value" data-testid="bytes-value" style="margin: 0; font-size: 26px;">0 B</dd></div>
-            </dl>
-
-            <div style="padding: 16px; border-radius: 14px; background: #0f131a; border: 1px solid #222c3b; margin-bottom: 18px;">
-              <p style="margin: 0 0 8px; color: #7e8aa0;">Current item</p>
-              <p id="current-path" data-testid="current-path" style="margin: 0; color: #dfe7f5; word-break: break-all;">Waiting for a scan.</p>
-            </div>
-
-            <div style="padding: 16px; border-radius: 14px; background: #0f131a; border: 1px solid #222c3b;">
-              <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px;">
-                <h2 style="margin: 0; font-size: 18px;">Files</h2>
-                <span id="selected-job-status" data-testid="selected-job-status" style="color: #9eb6ff; font-size: 13px;">No scan selected</span>
-              </div>
-              <div style="max-height: 320px; overflow: auto; border: 1px solid #1d2430; border-radius: 12px;">
-                <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
-                  <thead style="position: sticky; top: 0; background: #111722;">
-                    <tr>
-                      <th style="text-align: left; padding: 10px; border-bottom: 1px solid #1d2430;">Name</th>
-                      <th style="text-align: left; padding: 10px; border-bottom: 1px solid #1d2430;">Category</th>
-                      <th style="text-align: left; padding: 10px; border-bottom: 1px solid #1d2430;">Size</th>
-                    </tr>
-                  </thead>
-                  <tbody id="files-table-body" data-testid="files-table-body"></tbody>
-                </table>
+              <div id="status-banner" data-testid="status-banner" style="padding:14px 16px; border-radius:14px; background:#0f131a; border:1px solid #222c3b; color:#dfe7f5;">Waiting for a scan.</div>
+              <dl style="display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin:0;">
+                <div style="padding:16px; border-radius:14px; background:#121720; border:1px solid #222c3b;"><dt style="color:#7e8aa0; margin-bottom:6px;">Paths</dt><dd id="paths-value" data-testid="paths-value" style="margin:0; font-size:26px;">0</dd></div>
+                <div style="padding:16px; border-radius:14px; background:#121720; border:1px solid #222c3b;"><dt style="color:#7e8aa0; margin-bottom:6px;">Files</dt><dd id="files-value" data-testid="files-value" style="margin:0; font-size:26px;">0</dd></div>
+                <div style="padding:16px; border-radius:14px; background:#121720; border:1px solid #222c3b;"><dt style="color:#7e8aa0; margin-bottom:6px;">Bytes</dt><dd id="bytes-value" data-testid="bytes-value" style="margin:0; font-size:26px;">0 B</dd></div>
+              </dl>
+              <div style="padding:16px; border-radius:14px; background:#0f131a; border:1px solid #222c3b;"><p style="margin:0 0 8px; color:#7e8aa0;">Current item</p><p id="current-path" data-testid="current-path" style="margin:0; color:#dfe7f5; word-break:break-all;">Waiting for a scan.</p></div>
+              <div style="padding:16px; border-radius:14px; background:#0f131a; border:1px solid #222c3b;">
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:12px;"><h2 style="margin:0; font-size:18px;">Files</h2><span id="selected-job-status" data-testid="selected-job-status" style="color:#9eb6ff; font-size:13px;">No scan selected</span></div>
+                <div style="max-height:320px; overflow:auto; border:1px solid #1d2430; border-radius:12px;"><table style="width:100%; border-collapse:collapse; font-size:13px;"><thead style="position:sticky; top:0; background:#111722;"><tr><th style="text-align:left; padding:10px; border-bottom:1px solid #1d2430;">Name</th><th style="text-align:left; padding:10px; border-bottom:1px solid #1d2430;">Category</th><th style="text-align:left; padding:10px; border-bottom:1px solid #1d2430;">Size</th><th style="text-align:left; padding:10px; border-bottom:1px solid #1d2430;">Hash</th></tr></thead><tbody id="files-table-body" data-testid="files-table-body"></tbody></table></div>
               </div>
             </div>
           </section>
-
-          <section style="background: rgba(24, 30, 40, 0.92); border: 1px solid #2a3240; border-radius: 18px; padding: 24px; box-shadow: 0 18px 40px rgba(0,0,0,0.2);">
-            <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px;">
-              <h2 style="margin: 0; font-size: 20px;">Diagnostics</h2>
-              <span style="color: #7e8aa0; font-size: 12px;">Filesystem warnings and lifecycle events</span>
+          <section style="background:rgba(24,30,40,0.92); border:1px solid #2a3240; border-radius:18px; padding:24px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:12px;"><h2 style="margin:0; font-size:20px;">Diagnostics</h2><span style="color:#7e8aa0; font-size:12px;">Filesystem warnings and lifecycle events</span></div>
+            <ul id="scan-events" data-testid="scan-events" style="margin:0; padding:0; display:grid; gap:10px; max-height:260px; overflow:auto;"></ul>
+          </section>
+          <section style="background:rgba(24,30,40,0.92); border:1px solid #2a3240; border-radius:18px; padding:24px;">
+            <div style="display:flex; justify-content:space-between; gap:12px; align-items:center; margin-bottom:12px;"><h2 style="margin:0; font-size:20px;">Exact duplicate review</h2><span style="color:#7e8aa0; font-size:12px;">Full-file SHA-256 matches only · preview before any future action</span></div>
+            <div id="duplicate-status-banner" data-testid="duplicate-status-banner" style="padding:14px 16px; border-radius:14px; background:#0f131a; border:1px solid #222c3b; color:#dfe7f5; margin-bottom:16px;">No duplicate analysis run yet.</div>
+            <div style="display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin-bottom:16px;">
+              <div style="padding:16px; border-radius:14px; background:#121720; border:1px solid #222c3b;"><dt style="color:#7e8aa0; margin-bottom:6px;">Groups</dt><dd id="duplicate-groups-count" data-testid="duplicate-groups-count" style="margin:0; font-size:24px;">0</dd></div>
+              <div style="padding:16px; border-radius:14px; background:#121720; border:1px solid #222c3b;"><dt style="color:#7e8aa0; margin-bottom:6px;">Files</dt><dd id="duplicate-files-count" data-testid="duplicate-files-count" style="margin:0; font-size:24px;">0</dd></div>
+              <div style="padding:16px; border-radius:14px; background:#121720; border:1px solid #222c3b;"><dt style="color:#7e8aa0; margin-bottom:6px;">Duplicate bytes</dt><dd id="duplicate-bytes" data-testid="duplicate-bytes" style="margin:0; font-size:24px;">0 B</dd></div>
+              <div style="padding:16px; border-radius:14px; background:#121720; border:1px solid #222c3b;"><dt style="color:#7e8aa0; margin-bottom:6px;">Reclaimable</dt><dd id="duplicate-reclaimable" data-testid="duplicate-reclaimable" style="margin:0; font-size:24px;">0 B</dd></div>
             </div>
-            <ul id="scan-events" data-testid="scan-events" style="margin: 0; padding: 0; display: grid; gap: 10px; max-height: 260px; overflow: auto;"></ul>
+            <div style="display:grid; grid-template-columns:minmax(0,0.9fr) minmax(0,1.1fr); gap:16px;">
+              <div><div id="duplicate-group-list" data-testid="duplicate-group-list" style="display:grid; gap:12px;"></div></div>
+              <div><ul id="duplicate-group-files" data-testid="duplicate-group-files" style="margin:0; padding:0; display:grid; gap:10px;"></ul></div>
+            </div>
           </section>
         </div>
-
-        <aside style="background: rgba(24, 30, 40, 0.92); border: 1px solid #2a3240; border-radius: 18px; padding: 24px; box-shadow: 0 18px 40px rgba(0,0,0,0.2);">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-            <h2 style="margin: 0; font-size: 20px;">Recent scans</h2>
-            <button id="refresh-jobs" data-testid="refresh-jobs" style="appearance: none; border: 1px solid #3a4354; border-radius: 10px; background: transparent; color: white; padding: 8px 12px; font-weight: 600; cursor: pointer;">Refresh</button>
-          </div>
-          <div id="recent-jobs" data-testid="recent-jobs" style="display: grid; gap: 12px;"></div>
+        <aside style="background:rgba(24,30,40,0.92); border:1px solid #2a3240; border-radius:18px; padding:24px; box-shadow:0 18px 40px rgba(0,0,0,0.2);">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;"><h2 style="margin:0; font-size:20px;">Recent scans</h2><button id="refresh-jobs" data-testid="refresh-jobs">Refresh</button></div>
+          <div id="recent-jobs" data-testid="recent-jobs" style="display:grid; gap:12px;"></div>
         </aside>
       </section>
-    </main>
-  `;
+    </main>`;
+
+  for (const button of app.querySelectorAll('button')) {
+    Object.assign(button.style, { appearance: 'none', border: '1px solid #3a4354', borderRadius: '10px', background: '#161b24', color: 'white', padding: '12px 16px', fontWeight: '600', cursor: 'pointer' });
+  }
 
   const version = queryRequired<HTMLParagraphElement>('#version');
   const selectFolderButton = queryRequired<HTMLButtonElement>('#select-folder');
   const startScanButton = queryRequired<HTMLButtonElement>('#start-scan');
   const cancelScanButton = queryRequired<HTMLButtonElement>('#cancel-scan');
+  const startDuplicateAnalysisButton = queryRequired<HTMLButtonElement>('#start-duplicate-analysis');
+  const cancelDuplicateAnalysisButton = queryRequired<HTMLButtonElement>('#cancel-duplicate-analysis');
   const refreshJobsButton = queryRequired<HTMLButtonElement>('#refresh-jobs');
   const folderPath = queryRequired<HTMLSpanElement>('#folder-path');
   const progressBar = queryRequired<HTMLDivElement>('#progress-bar');
@@ -186,10 +191,19 @@ export const bootstrapRenderer = (): void => {
   const filesTableBody = queryRequired<HTMLTableSectionElement>('#files-table-body');
   const selectedJobStatus = queryRequired<HTMLSpanElement>('#selected-job-status');
   const scanEvents = queryRequired<HTMLUListElement>('#scan-events');
+  const duplicateStatusBanner = queryRequired<HTMLDivElement>('#duplicate-status-banner');
+  const duplicateGroupsCount = queryRequired<HTMLElement>('#duplicate-groups-count');
+  const duplicateFilesCount = queryRequired<HTMLElement>('#duplicate-files-count');
+  const duplicateBytes = queryRequired<HTMLElement>('#duplicate-bytes');
+  const duplicateReclaimable = queryRequired<HTMLElement>('#duplicate-reclaimable');
+  const duplicateGroupList = queryRequired<HTMLDivElement>('#duplicate-group-list');
+  const duplicateGroupFiles = queryRequired<HTMLUListElement>('#duplicate-group-files');
 
   let selectedFolderPath: string | null = null;
   let activeJobId: string | null = null;
+  let activeAnalysisJobId: string | null = null;
   let selectedJobId: string | null = null;
+  let selectedGroupId: string | null = null;
 
   const reportError = (message: string, error: unknown): void => {
     const detail = error instanceof Error ? error.message : 'Unknown error';
@@ -197,13 +211,20 @@ export const bootstrapRenderer = (): void => {
     statusBanner.style.borderColor = '#7a4040';
     progressLabel.textContent = 'error';
   };
-
-  const renderFiles = (entries: readonly ScanFileDto[]): void => {
-    filesTableBody.innerHTML = buildFileRowsMarkup(entries);
+  const reportDuplicateError = (message: string, error: unknown): void => {
+    const detail = error instanceof Error ? error.message : 'Unknown error';
+    duplicateStatusBanner.textContent = `${message}: ${detail}`;
+    duplicateStatusBanner.style.borderColor = '#7a4040';
   };
 
-  const renderEvents = (entries: readonly ScanEventDto[]): void => {
-    scanEvents.innerHTML = buildEventListMarkup(entries);
+  const renderFiles = (entries: readonly ScanFileDto[]): void => { filesTableBody.innerHTML = buildFileRowsMarkup(entries); };
+  const renderEvents = (entries: readonly ScanEventDto[]): void => { scanEvents.innerHTML = buildEventListMarkup(entries); };
+  const renderDuplicateGroupFiles = (entries: readonly DuplicateGroupFileDto[]): void => { duplicateGroupFiles.innerHTML = buildDuplicateGroupFileMarkup(entries); };
+  const renderDuplicateSummary = (summary: DuplicateSummaryDto): void => {
+    duplicateGroupsCount.textContent = String(summary.totalGroups);
+    duplicateFilesCount.textContent = String(summary.totalFiles);
+    duplicateBytes.textContent = formatBytes(summary.duplicateBytes);
+    duplicateReclaimable.textContent = formatBytes(summary.reclaimableBytes);
   };
 
   const renderJobMetrics = (job: ScanJobDto): void => {
@@ -215,81 +236,73 @@ export const bootstrapRenderer = (): void => {
     currentPath.textContent = job.currentPath ?? 'Waiting for work.';
     selectedJobStatus.textContent = `${job.status.toUpperCase()} · ${new Date(job.startedAt).toLocaleString()}`;
     statusBanner.textContent = describeJobStatus(job);
-    statusBanner.style.borderColor =
-      job.status === 'failed'
-        ? '#7a4040'
-        : job.status === 'cancelled'
-          ? '#735656'
-          : job.status === 'completed'
-            ? '#305d41'
-            : '#222c3b';
+    statusBanner.style.borderColor = job.status === 'failed' ? '#7a4040' : job.status === 'cancelled' ? '#735656' : job.status === 'completed' ? '#305d41' : '#222c3b';
+    startDuplicateAnalysisButton.disabled = job.status !== 'completed' || activeAnalysisJobId !== null;
   };
 
-  const loadFilesForJob = async (jobId: string): Promise<void> => {
-    const files = await window.filePilot.listFilesForJob({ jobId, limit: 250 });
-    renderFiles(files);
+  const renderDuplicateJob = (job: DuplicateAnalysisJobDto | null): void => {
+    duplicateStatusBanner.textContent = describeDuplicateStatus(job);
+    duplicateStatusBanner.style.borderColor = job?.status === 'failed' ? '#7a4040' : job?.status === 'completed' ? '#305d41' : job?.status === 'cancelled' ? '#735656' : '#222c3b';
+    cancelDuplicateAnalysisButton.disabled = !(job && job.status === 'running');
+    startDuplicateAnalysisButton.disabled = !selectedJobId || activeAnalysisJobId !== null;
   };
 
-  const loadEventsForJob = async (jobId: string): Promise<void> => {
-    const events = await window.filePilot.listEventsForJob({ jobId, limit: 50 });
-    renderEvents(events);
+  const loadFilesForJob = async (jobId: string): Promise<void> => renderFiles(await window.filePilot.listFilesForJob({ jobId, limit: 250 }));
+  const loadEventsForJob = async (jobId: string): Promise<void> => renderEvents(await window.filePilot.listEventsForJob({ jobId, limit: 50 }));
+  const loadDuplicateSummary = async (jobId: string): Promise<void> => renderDuplicateSummary(await window.filePilot.getDuplicateSummary({ scanJobId: jobId }));
+  const loadDuplicateGroups = async (jobId: string): Promise<void> => {
+    const groups = await window.filePilot.listDuplicateGroups({ scanJobId: jobId, limit: 100, offset: 0 });
+    if (!selectedGroupId || !groups.some((group) => group.id === selectedGroupId)) {
+      selectedGroupId = groups[0]?.id ?? null;
+    }
+    duplicateGroupList.innerHTML = buildDuplicateGroupMarkup(groups, selectedGroupId);
+    for (const button of duplicateGroupList.querySelectorAll<HTMLButtonElement>('button[data-group-id]')) {
+      button.addEventListener('click', () => {
+        selectedGroupId = button.dataset.groupId ?? null;
+        void refreshDuplicatePanels();
+      });
+    }
+  };
+  const loadSelectedGroupFiles = async (): Promise<void> => {
+    if (!selectedGroupId) return renderDuplicateGroupFiles([]);
+    renderDuplicateGroupFiles(await window.filePilot.listDuplicateGroupFiles({ groupId: selectedGroupId, limit: 50, offset: 0 }));
+  };
+  const refreshDuplicatePanels = async (): Promise<void> => {
+    if (!selectedJobId) return;
+    await Promise.all([loadDuplicateGroups(selectedJobId), loadDuplicateSummary(selectedJobId)]);
+    await loadSelectedGroupFiles();
   };
 
   const selectJob = async (jobId: string): Promise<void> => {
     selectedJobId = jobId;
     const job = await window.filePilot.getScanJob({ jobId });
-    if (!job) {
-      return;
-    }
-
+    if (!job) return;
     renderJobMetrics(job);
-    await Promise.all([loadFilesForJob(jobId), loadEventsForJob(jobId)]);
+    const duplicateJob = await window.filePilot.getLatestDuplicateAnalysis({ scanJobId: jobId });
+    activeAnalysisJobId = duplicateJob?.status === 'running' ? duplicateJob.id : null;
+    renderDuplicateJob(duplicateJob);
+    await Promise.all([loadFilesForJob(jobId), loadEventsForJob(jobId), refreshDuplicatePanels()]);
   };
 
   const renderRecentJobs = async (): Promise<void> => {
     const jobs = await window.filePilot.listRecentScanJobs();
-    recentJobs.innerHTML =
-      jobs.length === 0
-        ? '<p style="margin: 0; color: #8b96a9;">No scans have been recorded yet.</p>'
-        : jobs
-            .map(
-              (job) => `
-              <button data-job-id="${job.id}" data-testid="recent-job-${job.id}" style="text-align: left; width: 100%; appearance: none; border: 1px solid #273041; background: #101620; color: white; border-radius: 12px; padding: 14px; cursor: pointer;">
-                <div style="display: flex; justify-content: space-between; gap: 12px; margin-bottom: 6px;">
-                  <strong style="display: block; overflow: hidden; text-overflow: ellipsis;">${job.rootPath}</strong>
-                  <span style="color: ${job.status === 'failed' ? '#ff8f8f' : job.status === 'cancelled' ? '#ffd27d' : '#9eb6ff'}; text-transform: capitalize;">${job.status}</span>
-                </div>
-                <div style="color: #8b96a9; font-size: 12px;">${job.discoveredFiles} files · ${formatBytes(job.scannedBytes)} · ${job.percentComplete}%</div>
-                ${job.errorMessage ? `<div style="margin-top: 8px; color: #ffb9b9; font-size: 12px;">${job.errorMessage}</div>` : ''}
-              </button>`
-            )
-            .join('');
-
+    recentJobs.innerHTML = jobs.length === 0 ? '<p style="margin:0; color:#8b96a9;">No scans have been recorded yet.</p>' : jobs.map((job) => `
+      <button data-job-id="${job.id}" data-testid="recent-job-${job.id}" style="text-align:left; width:100%;">
+        <div style="display:flex; justify-content:space-between; gap:12px; margin-bottom:6px;"><strong style="display:block; overflow:hidden; text-overflow:ellipsis;">${job.rootPath}</strong><span style="color:${job.status === 'failed' ? '#ff8f8f' : job.status === 'cancelled' ? '#ffd27d' : '#9eb6ff'}; text-transform:capitalize;">${job.status}</span></div>
+        <div style="color:#8b96a9; font-size:12px;">${job.discoveredFiles} files · ${formatBytes(job.scannedBytes)} · ${job.percentComplete}%</div>
+      </button>`).join('');
     for (const button of recentJobs.querySelectorAll<HTMLButtonElement>('button[data-job-id]')) {
-      button.addEventListener('click', () => {
-        const jobId = button.dataset.jobId;
-        if (jobId) {
-          void selectJob(jobId);
-        }
-      });
+      button.addEventListener('click', () => { const jobId = button.dataset.jobId; if (jobId) void selectJob(jobId); });
     }
   };
 
   const renderProgress = async (progress: ScanProgressEvent): Promise<void> => {
-    if (progress.id !== activeJobId && progress.id !== selectedJobId) {
-      return;
-    }
-
-    if (progress.id === activeJobId) {
-      renderJobMetrics(progress);
-    }
-
-    if (progress.id === selectedJobId || selectedJobId === null) {
+    if (progress.id !== activeJobId && progress.id !== selectedJobId) return;
+    if (progress.id === activeJobId || progress.id === selectedJobId || selectedJobId === null) {
       selectedJobId = progress.id;
       renderJobMetrics(progress);
       await Promise.all([loadFilesForJob(progress.id), loadEventsForJob(progress.id)]);
     }
-
     await renderRecentJobs();
   };
 
@@ -299,33 +312,36 @@ export const bootstrapRenderer = (): void => {
       startScanButton.disabled = selectedFolderPath === null;
       cancelScanButton.disabled = true;
     }
-
     const job = await window.filePilot.getScanJob({ jobId: completion.jobId });
     if (job && (selectedJobId === completion.jobId || selectedJobId === null)) {
       renderJobMetrics(job);
       await Promise.all([loadFilesForJob(job.id), loadEventsForJob(job.id)]);
     }
-
-    progressLabel.textContent =
-      completion.status === 'completed'
-        ? 'completed · 100%'
-        : completion.status === 'cancelled'
-          ? 'cancelled'
-          : `${completion.status}${completion.errorMessage ? ` · ${completion.errorMessage}` : ''}`;
     await renderRecentJobs();
   };
 
-  window.filePilot.onScanProgress((event: ScanProgressEvent) => {
-    void renderProgress(event);
-  });
-  window.filePilot.onScanComplete((event: ScanCompleteEvent) => {
-    void renderCompletion(event);
-  });
+  const renderDuplicateProgress = async (progress: DuplicateAnalysisProgressEvent): Promise<void> => {
+    if (selectedJobId !== progress.scanJobId) return;
+    activeAnalysisJobId = progress.status === 'running' ? progress.id : null;
+    renderDuplicateJob(progress);
+    await refreshDuplicatePanels();
+  };
+  const renderDuplicateCompletion = async (completion: DuplicateAnalysisCompleteEvent): Promise<void> => {
+    if (selectedJobId !== completion.scanJobId) return;
+    activeAnalysisJobId = null;
+    const latest = await window.filePilot.getDuplicateAnalysisJob({ analysisJobId: completion.analysisJobId });
+    renderDuplicateJob(latest);
+    await refreshDuplicatePanels();
+  };
+
+  window.filePilot.onScanProgress((event: ScanProgressEvent) => { void renderProgress(event); });
+  window.filePilot.onScanComplete((event: ScanCompleteEvent) => { void renderCompletion(event); });
+  window.filePilot.onDuplicateAnalysisProgress((event: DuplicateAnalysisProgressEvent) => { void renderDuplicateProgress(event); });
+  window.filePilot.onDuplicateAnalysisComplete((event: DuplicateAnalysisCompleteEvent) => { void renderDuplicateCompletion(event); });
 
   void (async () => {
     try {
-      const electronVersion = await window.filePilot.getVersion();
-      version.textContent = `Secure Electron preload bridge connected · Electron ${electronVersion}`;
+      version.textContent = `Secure Electron preload bridge connected · Electron ${await window.filePilot.getVersion()}`;
       await renderRecentJobs();
     } catch (error) {
       reportError('Failed to initialize renderer data', error);
@@ -339,61 +355,52 @@ export const bootstrapRenderer = (): void => {
       folderPath.textContent = result.folderPath ?? 'No folder selected.';
       startScanButton.disabled = result.folderPath === null || activeJobId !== null;
       progressLabel.textContent = result.canceled ? 'Selection cancelled' : 'Ready';
-      statusBanner.textContent = result.folderPath
-        ? `Ready to scan ${result.folderPath}`
-        : 'Folder selection cancelled.';
-    } catch (error) {
-      reportError('Failed to select folder', error);
-    }
+      statusBanner.textContent = result.folderPath ? `Ready to scan ${result.folderPath}` : 'Folder selection cancelled.';
+    } catch (error) { reportError('Failed to select folder', error); }
   });
 
   startScanButton.addEventListener('click', async () => {
-    if (!selectedFolderPath) {
-      return;
-    }
-
+    if (!selectedFolderPath) return;
     try {
       startScanButton.disabled = true;
       cancelScanButton.disabled = false;
       progressBar.style.width = '0%';
       progressLabel.textContent = 'starting';
       currentPath.textContent = selectedFolderPath;
-      pathsValue.textContent = '0';
-      filesValue.textContent = '0';
-      bytesValue.textContent = '0 B';
+      pathsValue.textContent = '0'; filesValue.textContent = '0'; bytesValue.textContent = '0 B';
       statusBanner.textContent = `Preparing scan for ${selectedFolderPath}`;
-      renderFiles([]);
-      renderEvents([]);
-
+      renderFiles([]); renderEvents([]);
+      renderDuplicateGroupFiles([]); renderDuplicateSummary({ totalGroups: 0, totalFiles: 0, duplicateBytes: 0, reclaimableBytes: 0 });
       const job = await window.filePilot.startScan({ rootPath: selectedFolderPath });
-      activeJobId = job.id;
-      selectedJobId = job.id;
-      renderJobMetrics(job);
-      await renderRecentJobs();
+      activeJobId = job.id; selectedJobId = job.id; selectedGroupId = null; renderJobMetrics(job); await renderRecentJobs();
     } catch (error) {
-      startScanButton.disabled = false;
-      cancelScanButton.disabled = true;
-      reportError('Failed to start scan', error);
+      startScanButton.disabled = false; cancelScanButton.disabled = true; reportError('Failed to start scan', error);
     }
   });
 
   cancelScanButton.addEventListener('click', async () => {
-    if (!activeJobId) {
-      return;
-    }
+    if (!activeJobId) return;
+    try { statusBanner.textContent = 'Cancelling scan...'; await window.filePilot.cancelScan({ jobId: activeJobId }); cancelScanButton.disabled = true; } catch (error) { reportError('Failed to cancel scan', error); }
+  });
 
+  startDuplicateAnalysisButton.addEventListener('click', async () => {
+    if (!selectedJobId) return;
     try {
-      statusBanner.textContent = 'Cancelling scan...';
-      await window.filePilot.cancelScan({ jobId: activeJobId });
-      cancelScanButton.disabled = true;
+      const job = await window.filePilot.startDuplicateAnalysis({ scanJobId: selectedJobId });
+      activeAnalysisJobId = job.id;
+      renderDuplicateJob(job);
     } catch (error) {
-      reportError('Failed to cancel scan', error);
+      reportDuplicateError('Failed to start duplicate analysis', error);
     }
   });
-
-  refreshJobsButton.addEventListener('click', () => {
-    void renderRecentJobs();
+  cancelDuplicateAnalysisButton.addEventListener('click', async () => {
+    if (!activeAnalysisJobId) return;
+    try {
+      await window.filePilot.cancelDuplicateAnalysis({ analysisJobId: activeAnalysisJobId });
+      cancelDuplicateAnalysisButton.disabled = true;
+    } catch (error) { reportDuplicateError('Failed to cancel duplicate analysis', error); }
   });
+  refreshJobsButton.addEventListener('click', () => { void renderRecentJobs(); });
 };
 
 if (typeof document !== 'undefined' && typeof window !== 'undefined' && 'filePilot' in window) {

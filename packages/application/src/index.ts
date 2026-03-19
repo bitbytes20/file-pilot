@@ -1,5 +1,16 @@
-import type { FileRecord, ScanEventRecord, ScanJob } from '@filepilot/domain';
 import type {
+  DuplicateAnalysisJob,
+  DuplicateGroup,
+  DuplicateGroupFile,
+  DuplicateSummary,
+  FileRecord,
+  ScanEventRecord,
+  ScanJob,
+} from '@filepilot/domain';
+import type {
+  DuplicateAnalysisJobRepository,
+  DuplicateAnalyzer,
+  DuplicateGroupRepository,
   FileRepository,
   FileScanner,
   ScanEventRepository,
@@ -79,5 +90,85 @@ export class ScanCoordinator {
     }
 
     return job;
+  }
+}
+
+export interface DuplicateCoordinatorDependencies {
+  readonly analyzer: DuplicateAnalyzer;
+  readonly analysisJobs: DuplicateAnalysisJobRepository;
+  readonly groups: DuplicateGroupRepository;
+}
+
+export interface DuplicateCoordinatorEvents {
+  readonly onProgress?: (job: DuplicateAnalysisJob) => void;
+  readonly onComplete?: (job: DuplicateAnalysisJob) => void;
+}
+
+export class DuplicateCoordinator {
+  private readonly activeAnalyses = new Map<string, { cancel(): void; promise?: Promise<DuplicateAnalysisJob> }>();
+  private readonly dependencies: DuplicateCoordinatorDependencies;
+
+  public constructor(dependencies: DuplicateCoordinatorDependencies) {
+    this.dependencies = dependencies;
+  }
+
+  public async recoverInterruptedAnalyses(): Promise<number> {
+    return this.dependencies.analysisJobs.failStaleJobs(
+      'Marked failed after app restart interrupted a previous duplicate analysis.'
+    );
+  }
+
+  public async startAnalysis(
+    scanJobId: string,
+    events: DuplicateCoordinatorEvents = {}
+  ): Promise<DuplicateAnalysisJob> {
+    const controller = this.dependencies.analyzer.start(scanJobId, {
+      onProgress: ({ job }) => events.onProgress?.(job),
+      onComplete: (job) => {
+        this.activeAnalyses.delete(job.id);
+        events.onComplete?.(job);
+      },
+    });
+
+    this.activeAnalyses.set(controller.analysisJobId, controller);
+    void controller.promise.catch(() => {
+      this.activeAnalyses.delete(controller.analysisJobId);
+    });
+
+    const job = this.dependencies.analysisJobs.getById(controller.analysisJobId);
+    if (!job) {
+      throw new Error(`Expected duplicate analysis job ${controller.analysisJobId} to exist.`);
+    }
+
+    return job;
+  }
+
+  public async cancelAnalysis(analysisJobId: string): Promise<DuplicateAnalysisJob | null> {
+    this.activeAnalyses.get(analysisJobId)?.cancel();
+    return this.dependencies.analysisJobs.getById(analysisJobId);
+  }
+
+  public async getAnalysisJob(analysisJobId: string): Promise<DuplicateAnalysisJob | null> {
+    return this.dependencies.analysisJobs.getById(analysisJobId);
+  }
+
+  public async getLatestAnalysisForScan(scanJobId: string): Promise<DuplicateAnalysisJob | null> {
+    return this.dependencies.analysisJobs.getLatestForScanJob(scanJobId);
+  }
+
+  public async listGroups(scanJobId: string, limit = 100, offset = 0): Promise<readonly DuplicateGroup[]> {
+    return this.dependencies.groups.listByScanJobId(scanJobId, limit, offset);
+  }
+
+  public async getGroup(groupId: string): Promise<DuplicateGroup | null> {
+    return this.dependencies.groups.getById(groupId);
+  }
+
+  public async listGroupFiles(groupId: string, limit = 200, offset = 0): Promise<readonly DuplicateGroupFile[]> {
+    return this.dependencies.groups.listFiles(groupId, limit, offset);
+  }
+
+  public async summarize(scanJobId: string): Promise<DuplicateSummary> {
+    return this.dependencies.groups.summarizeByScanJobId(scanJobId);
   }
 }

@@ -127,6 +127,29 @@ test('shows failure state for inaccessible or missing root path', async () => {
   await app.close();
 });
 
+
+
+test('runs duplicate analysis and shows duplicate groups for a completed scan', async () => {
+  const userDataDir = await createTempDir('filepilot-e2e-userdata-');
+  const scanRoot = await createTempDir('filepilot-e2e-scan-');
+  await fs.mkdir(path.join(scanRoot, 'dupes'), { recursive: true });
+  await fs.writeFile(path.join(scanRoot, 'dupes', 'copy-a.txt'), 'exact-duplicate');
+  await fs.writeFile(path.join(scanRoot, 'dupes', 'copy-b.txt'), 'exact-duplicate');
+  await fs.writeFile(path.join(scanRoot, 'unique.txt'), 'different-content');
+
+  const { app, page } = await launchDesktop({ userDataDir, selectedFolder: scanRoot });
+  await page.getByTestId('select-folder').click();
+  await page.getByTestId('start-scan').click();
+  await expect(page.getByTestId('progress-label')).toContainText(/completed/i, { timeout: 30_000 });
+
+  await page.getByTestId('start-duplicate-analysis').click();
+  await expect(page.getByTestId('duplicate-status-banner')).toContainText(/Completed/i, { timeout: 30_000 });
+  await expect(page.getByTestId('duplicate-groups-count')).toContainText('1');
+  await expect(page.getByTestId('duplicate-group-list')).toContainText('exact matches');
+  await expect(page.getByTestId('duplicate-group-files')).toContainText('Keep candidate');
+
+  await app.close();
+});
 test('recent scans persist across relaunch', async () => {
   const userDataDir = await createTempDir('filepilot-e2e-userdata-');
   const scanRoot = await createTempDir('filepilot-e2e-scan-');
