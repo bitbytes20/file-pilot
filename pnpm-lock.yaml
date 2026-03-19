@@ -101,6 +101,13 @@ importers:
         version: 1.6.1(@types/node@20.19.37)
 
   packages/application:
+    dependencies:
+      '@filepilot/domain':
+        specifier: workspace:*
+        version: link:../domain
+      '@filepilot/infrastructure':
+        specifier: workspace:*
+        version: link:../infrastructure
     devDependencies:
       '@filepilot/config':
         specifier: workspace:*
@@ -121,6 +128,10 @@ importers:
         version: link:../config
 
   packages/shared-contracts:
+    dependencies:
+      '@filepilot/domain':
+        specifier: workspace:*
+        version: link:../domain
     devDependencies:
       '@filepilot/config':
         specifier: workspace:*
