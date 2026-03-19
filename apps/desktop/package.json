@@ -9,7 +9,9 @@
     "dev": "pnpm run build && cross-env NODE_ENV=development electron .",
     "lint": "eslint --max-warnings=0 \"src/**/*.{ts,tsx}\"",
     "typecheck": "tsc -b",
-    "test": "vitest --run"
+    "test": "node --experimental-strip-types --test src/**/*.test.ts",
+    "test:e2e": "pnpm run build && playwright test -c ../../playwright.desktop.config.ts",
+    "smoke:built": "pnpm run build && cross-env NODE_ENV=test electron ."
   },
   "dependencies": {
     "@filepilot/application": "workspace:*",

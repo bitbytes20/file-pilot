@@ -9,12 +9,11 @@
     "rootDir": "src",
     "tsBuildInfoFile": "dist/.tsbuildinfo"
   },
-  "include": [
-    "src"
-  ],
+  "include": ["src"],
   "references": [
     {
       "path": "../domain"
     }
-  ]
+  ],
+  "exclude": ["src/**/*.test.ts"]
 }

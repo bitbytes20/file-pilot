@@ -1,6 +1,6 @@
 import { app, BrowserWindow } from 'electron';
 import { logger } from './logger.js';
-import { rendererBundlePath, preloadBundlePath } from './paths.js';
+import { configureUserDataPath, preloadBundlePath, rendererBundlePath } from './paths.js';
 import { enforceSecurityDefaults } from './security.js';
 import { registerIpcHandlers } from './ipc/registerHandlers.js';
 import { buildRendererHtml } from './ui/rendererHtml.js';
@@ -8,6 +8,8 @@ import { createMainWindow } from './windows/mainWindow.js';
 
 const isMac = process.platform === 'darwin';
 const isDev = process.env.NODE_ENV === 'development';
+
+configureUserDataPath();
 
 const getRendererUrl = async () => {
   const html = await buildRendererHtml(rendererBundlePath);
@@ -26,6 +28,12 @@ const loadMainWindow = async (): Promise<void> => {
 
 const bootstrap = async () => {
   await app.whenReady();
+  logger.info('Electron app ready.', {
+    userDataPath: app.getPath('userData'),
+    preloadBundlePath,
+    rendererBundlePath,
+    packaged: app.isPackaged,
+  });
   await enforceSecurityDefaults();
   registerIpcHandlers();
   await loadMainWindow();

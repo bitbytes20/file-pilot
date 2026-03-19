@@ -2,28 +2,24 @@
 
 FilePilot is a **Windows-first, local-first desktop utility** for safe and intelligent personal file management.
 
-## What FilePilot Will Do
+## Current implementation state
 
-- Scan folders and drives on demand
-- Detect exact duplicates by **content hash**
-- Preview files before actions
-- Search and filter with advanced controls
-- Reorganize files by categories (documents, music, photos, videos, archives, other)
-- Apply safe actions with confirmations, trash-first behavior, and operation audit logs
+Tranche D hardens the real scan foundation with:
 
-## Tech Stack
-
-- Electron
-- React
-- TypeScript
-- Monorepo with `pnpm` workspaces + Turborepo
+- real filesystem scanning into SQLite
+- recent scan persistence across relaunch
+- cancellation and failure-state handling
+- structured diagnostics and scan event logging
+- resilient desktop E2E scaffolding and CI quality gates
 
 ## Project Docs
 
 - Product requirements: [`docs/PRD.md`](docs/PRD.md)
 - Architecture blueprint: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
-- Roadmap (epics/stories/tasks): [`docs/ROADMAP.md`](docs/ROADMAP.md)
 - Testing strategy: [`docs/TESTING_STRATEGY.md`](docs/TESTING_STRATEGY.md)
+- Packaging/runtime notes: [`docs/PACKAGING.md`](docs/PACKAGING.md)
+- Troubleshooting: [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md)
+- Roadmap: [`docs/ROADMAP.md`](docs/ROADMAP.md)
 - Implementation tracker: [`docs/IMPLEMENTATION_TRACKER.md`](docs/IMPLEMENTATION_TRACKER.md)
 - Contributing guide: [`CONTRIBUTING.md`](CONTRIBUTING.md)
 - Security policy: [`SECURITY.md`](SECURITY.md)
@@ -32,13 +28,14 @@ FilePilot is a **Windows-first, local-first desktop utility** for safe and intel
 
 ```text
 apps/
-  desktop/              # Electron main + preload + React renderer
+  desktop/              # Electron main + preload + renderer
 packages/
   domain/               # Core domain entities/value objects/interfaces
   application/          # Use cases / orchestration services
-  infrastructure/       # FS adapters, hashing, DB, logging, diagnostics
+  infrastructure/       # FS adapters, DB bootstrap, logging, diagnostics
   ui/                   # Shared UI components and design tokens
-  config/               # Shared ESLint, TS, Vitest, Playwright configs
+  config/               # Shared ESLint/TS/Vitest/Playwright configs
+  shared-contracts/     # Typed IPC contracts shared across layers
 ```
 
 ## Getting Started
@@ -48,23 +45,27 @@ pnpm install
 pnpm run lint
 pnpm run typecheck
 pnpm run test
-
-# Start the desktop shell (builds TypeScript and launches Electron)
-pnpm run dev --filter @filepilot/desktop
+pnpm run build
 ```
 
-### Workspace Layout
+## Useful commands
 
-```text
-apps/
-  desktop/              # Electron main/preload/renderer workspace
-packages/
-  domain/               # Domain models and invariants
-  application/          # Use cases and orchestration policies
-  infrastructure/       # Platform adapters (fs, db, hashing)
-  ui/                   # Shared UI primitives/tokens
-  shared-contracts/     # IPC contracts shared across layers
-  config/               # ESLint/Prettier/Vitest/Playwright configs
+```bash
+# Launch the desktop app in dev mode
+pnpm --filter @filepilot/desktop run dev
+
+# Run Electron E2E coverage
+pnpm run test:e2e
+
+# Build the desktop app bundles
+pnpm run build:desktop
+
+# Launch the built desktop app locally
+pnpm run smoke:desktop
 ```
 
-Each package is a TypeScript project reference so `tsc -b` builds the graph in dependency order. Use `pnpm --filter <package> <script>` to target a specific workspace (e.g., `pnpm --filter @filepilot/domain test`).
+## Runtime notes
+
+- FilePilot stores the scan database in Electron `userData` as `filepilot.sqlite`.
+- Structured logs are written under `userData/logs/filepilot.log`.
+- Test and isolation helpers are documented in [`docs/PACKAGING.md`](docs/PACKAGING.md).

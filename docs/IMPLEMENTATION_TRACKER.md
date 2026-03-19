@@ -38,6 +38,25 @@ Optional flags:
 
 ## Commit Entries
 
+### [2026-03-19] 29d6850 feat: harden tranche d scan foundation
+
+- Implemented:
+  - Hardened the scan pipeline with stale-job recovery, structured logging, persisted scan diagnostics, incremental traversal, throttled progress updates, and clearer failure/cancel terminal states.
+  - Expanded the desktop shell with diagnostics UI, resilient status handling, isolated test overrides, and typed scan-event IPC support.
+  - Added Node-runner integration coverage plus Playwright Electron smoke/e2e scaffolding for launch, scan, cancel, failure, and relaunch persistence flows.
+  - Strengthened repo quality gates and documentation with CI job splits, Windows desktop build verification, packaging/runtime notes, and troubleshooting guidance.
+- Affected areas:
+  - `packages/application`
+  - `packages/infrastructure`
+  - `packages/shared-contracts`
+  - `apps/desktop`
+  - `.github/workflows/ci.yml`
+  - `docs/*`
+  - `README.md`
+  - `CONTRIBUTING.md`
+- Notes:
+  - Electron E2E execution in this container is limited by missing desktop runtime launch support; the suite is wired and ready for CI/desktop-capable environments.
+
 ### [2026-03-18] pending fix: align eslint workspace import resolution
 
 - Implemented:
